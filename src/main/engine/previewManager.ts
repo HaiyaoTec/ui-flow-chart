@@ -47,6 +47,9 @@ export class PreviewManager {
     this.applyBounds()
     trace(`goto ${url}`)
     await this.driver.goto(url)
+    // about:blank 只是用来拉起渲染进程的，别让它留在历史里，否则「后退」会回到空白页
+    this.driver.clearHistory()
+    await this.driver.installUserInputWatcher()
     trace('goto done')
     this.lastUrl = url
     this.emitNav()

@@ -3,7 +3,9 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "lib": ["ES2023"],
+    // canvas-core 里有直接操作 DOM 的代码（导出 HTML 时会被序列化进产物），
+    // 主进程项目也要能编译它，所以带上 DOM 类型
+    "lib": ["ES2023", "DOM"],
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,

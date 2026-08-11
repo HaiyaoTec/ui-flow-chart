@@ -1,0 +1,97 @@
+.workspace {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ws-bar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  flex-wrap: wrap;
+}
+.ws-bar .grow {
+  flex: 1;
+}
+
+.state-chip {
+  font-size: 11.5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+.state-chip.observing,
+.state-chip.thinking,
+.state-chip.acting,
+.state-chip.launching,
+.state-chip.resuming {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.state-chip.awaiting_human {
+  color: var(--branch);
+  border-color: var(--branch);
+}
+.state-chip.failed {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.takeover-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 14px;
+  background: color-mix(in srgb, var(--branch) 14%, transparent);
+  border-bottom: 1px solid var(--branch);
+  font-size: 12.5px;
+}
+
+.ws-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 460px;
+}
+
+.ws-canvas {
+  min-width: 0;
+  min-height: 0;
+  border-right: 1px solid var(--line);
+}
+
+.ws-side {
+  display: grid;
+  grid-template-rows: 1fr 200px;
+  min-height: 0;
+}
+
+.ws-log {
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+  overflow: auto;
+  padding: 6px 10px;
+  font-size: 11.5px;
+  line-height: 1.7;
+}
+.log-line {
+  color: var(--fg);
+  word-break: break-word;
+}
+.log-line .mono {
+  color: var(--muted);
+  margin-right: 6px;
+}
+.log-line.warn {
+  color: var(--branch);
+}
+.log-line.error {
+  color: var(--danger);
+}

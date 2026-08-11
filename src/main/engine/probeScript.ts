@@ -39,6 +39,9 @@ export const PROBE_SCRIPT = `(() => {
   const elements = []
   for (const el of scope.querySelectorAll(SEL)) {
     if (!isVis(el)) continue
+    // 纯说明性的 <label> 不是可交互控件。把它报上去会让「手机号」这类词
+    // 优先匹配到标签而不是输入框，填写就会落到一个没有 value 的元素上。
+    if (el.tagName === 'LABEL' && !el.querySelector('input,select,textarea')) continue
     // 控件套控件时只取最内层，避免同一个按钮报两遍
     if ([...seen].some((s) => s.contains(el))) continue
     const r = el.getBoundingClientRect()

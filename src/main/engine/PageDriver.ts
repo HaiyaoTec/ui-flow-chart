@@ -10,6 +10,12 @@ export interface Bounds {
   height: number
 }
 
+/** 填写目标的身份特征，用于点击后核对焦点是否落在预期控件上 */
+export interface FillTarget {
+  name?: string
+  placeholder?: string
+}
+
 export interface Screenshot {
   /** 原始分辨率 PNG，落盘存档 */
   png: Buffer
@@ -24,7 +30,8 @@ export interface IPageDriver {
   waitStable(): Promise<ProbeResult>
   screenshot(): Promise<Screenshot>
   tap(x: number, y: number): Promise<void>
-  fillAt(x: number, y: number, text: string): Promise<void>
+  /** 返回是否确实写入成功 */
+  fillAt(x: number, y: number, text: string, expect?: FillTarget): Promise<boolean>
   scrollBy(delta: number): Promise<void>
   back(): Promise<void>
   currentUrl(): string
@@ -44,7 +51,6 @@ export class PageDriver implements IPageDriver {
   private inputScale = 1
   private bounds: Bounds = { x: 0, y: 0, width: 430, height: 932 }
   private visible = true
-  private inputIgnored = false
   private onNav?: (url: string, loading: boolean) => void
   private onCrash?: () => void
 
@@ -206,11 +212,51 @@ export class PageDriver implements IPageDriver {
     return this.visible
   }
 
-  /** AI 驱动期间屏蔽用户误触。CDP 派发的事件不受此开关影响 */
-  async setInputIgnored(ignore: boolean): Promise<void> {
-    if (this.inputIgnored === ignore) return
-    this.inputIgnored = ignore
-    await this.send('Input.setIgnoreInputEvents', { ignore })
+  /**
+   * 注意：不要用 Input.setIgnoreInputEvents 来屏蔽用户误触。
+   * 实测它会连 CDP 派发的事件一起吞掉，开启后自动点击全部失效、
+   * 而且不报任何错，表现为「循环在跑但页面纹丝不动」。
+   *
+   * 改为在页内标记自动化时间窗，把窗口之外的真实输入识别为「用户想接管」。
+   */
+  async markAutomating(): Promise<void> {
+    await this.evalInPage(`window.__ufcLastAuto = Date.now(); true`, 3000).catch(() => undefined)
+  }
+
+  /** 安装用户输入探测器，用于识别隐式接管意图 */
+  async installUserInputWatcher(): Promise<void> {
+    await this.evalInPage(
+      `(() => {
+        if (window.__ufcInputWatch) return true
+        window.__ufcInputWatch = true
+        window.__ufcLastAuto = 0
+        window.__ufcUserInput = 0
+        const mark = () => { if (Date.now() - (window.__ufcLastAuto || 0) > 1500) window.__ufcUserInput = Date.now() }
+        document.addEventListener('pointerdown', mark, true)
+        document.addEventListener('keydown', mark, true)
+        return true
+      })()`,
+      3000
+    ).catch(() => undefined)
+  }
+
+  /** 距上次真实用户输入的毫秒数，从未发生则返回 null */
+  async userInputAge(): Promise<number | null> {
+    const t = (await this.evalInPage(`window.__ufcUserInput || 0`, 3000).catch(() => 0)) as number
+    return t ? Date.now() - t : null
+  }
+
+  async clearUserInput(): Promise<void> {
+    await this.evalInPage(`window.__ufcUserInput = 0; true`, 3000).catch(() => undefined)
+  }
+
+  /** 清空历史，避免 back() 回退到启动时用来拉起渲染进程的 about:blank */
+  clearHistory(): void {
+    try {
+      this.view?.webContents.navigationHistory.clear()
+    } catch {
+      /* 某些时机下不可用，忽略 */
+    }
   }
 
   /* -------------------------------- 导航 -------------------------------- */
@@ -250,8 +296,7 @@ export class PageDriver implements IPageDriver {
   /* -------------------------- 探针与稳定帧等待 -------------------------- */
 
   async probe(): Promise<ProbeResult> {
-    if (!this.view) throw new Error('预览视图尚未创建')
-    return (await this.view.webContents.executeJavaScript(PROBE_SCRIPT, true)) as ProbeResult
+    return (await this.evalInPage(PROBE_SCRIPT)) as ProbeResult
   }
 
   /** 等待渲染安静：加载结束 + 图片解码 + 固定延时 */
@@ -275,38 +320,60 @@ export class PageDriver implements IPageDriver {
 
   /** 连续两次探针签名一致才算稳定，避开弹窗动画的中间态 */
   async waitStable(interval = 350, max = 12): Promise<ProbeResult> {
+    // 先等导航与图片就绪，否则第一针常常打在空页面上
+    await this.settle(300)
     let prevSig: string | null = null
     let last: ProbeResult | null = null
     for (let i = 0; i < max; i++) {
-      const p = await this.probe()
+      let p: ProbeResult
+      try {
+        p = await this.probe()
+      } catch {
+        // 导航切换期间探针会超时，等一拍再来
+        await delay(interval)
+        continue
+      }
       const sig = signatureOf(p)
       if (prevSig === sig) return p
       prevSig = sig
       last = p
       await delay(interval)
     }
-    return last ?? this.probe()
+    if (last) return last
+    return this.probe()
   }
 
   /* -------------------------------- 截图 -------------------------------- */
 
   async screenshot(): Promise<Screenshot> {
     if (!this.view || !this.device) throw new Error('预览视图尚未创建')
-    // clip.scale 固定输出倍率，与预览用的 fitScale 解耦——
-    // 无论画面缩放到多小，存档图始终是设备原始分辨率
-    const res = (await this.send('Page.captureScreenshot', {
-      format: 'png',
-      captureBeyondViewport: false,
-      clip: {
-        x: 0,
-        y: 0,
-        width: this.device.width,
-        height: this.device.height,
-        scale: this.device.deviceScaleFactor,
-      },
-    })) as { data: string }
 
-    const png = Buffer.from(res.data, 'base64')
+    let png: Buffer
+    try {
+      // clip.scale 固定输出倍率，与预览用的 fitScale 解耦——
+      // 无论画面缩放到多小，存档图始终是设备原始分辨率
+      const res = (await this.send(
+        'Page.captureScreenshot',
+        {
+          format: 'png',
+          captureBeyondViewport: false,
+          clip: {
+            x: 0,
+            y: 0,
+            width: this.device.width,
+            height: this.device.height,
+            scale: this.device.deviceScaleFactor,
+          },
+        },
+        20000
+      )) as { data: string }
+      png = Buffer.from(res.data, 'base64')
+    } catch {
+      // 合成器偶尔出不了帧（导航中、窗口被遮挡等），退回 Electron 自带的抓图
+      const img = await this.view.webContents.capturePage()
+      png = img.toPNG()
+    }
+
     const img = nativeImage.createFromBuffer(png)
     const thumb = img.isEmpty() ? img : img.resize({ width: SCREENSHOT_WIDTH_FOR_AI, quality: 'good' })
     return { png, jpegBase64: thumb.toJPEG(80).toString('base64') }
@@ -320,85 +387,142 @@ export class PageDriver implements IPageDriver {
   }
 
   async tap(cssX: number, cssY: number): Promise<void> {
+    await this.markAutomating()
     const { x, y } = this.toInput(cssX, cssY)
     if (this.device?.hasTouch) {
       const point = { x, y, radiusX: 12, radiusY: 12, force: 1 }
-      await this.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [point] })
+      await this.sendInput('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [point] })
       await delay(60)
-      await this.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+      await this.sendInput('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
     } else {
       const base = { x, y, button: 'left', clickCount: 1 }
-      await this.send('Input.dispatchMouseEvent', { ...base, type: 'mouseMoved', button: 'none' })
-      await this.send('Input.dispatchMouseEvent', { ...base, type: 'mousePressed' })
+      await this.sendInput('Input.dispatchMouseEvent', { ...base, type: 'mouseMoved', button: 'none' })
+      await this.sendInput('Input.dispatchMouseEvent', { ...base, type: 'mousePressed' })
       await delay(40)
-      await this.send('Input.dispatchMouseEvent', { ...base, type: 'mouseReleased' })
+      await this.sendInput('Input.dispatchMouseEvent', { ...base, type: 'mouseReleased' })
     }
     await delay(200)
   }
 
   /** 先点中输入框聚焦，再插入文本；insertText 产生 trusted 输入，受控组件能正常收到 */
-  async fillAt(x: number, y: number, text: string): Promise<void> {
+  /**
+   * 填写输入框：先点中聚焦，再用 insertText 产生 trusted 输入。
+   *
+   * 页面刚加载完时第一次点击有概率没能聚焦，导致 insertText 落空且毫无提示。
+   * 所以写完要回读校验，没写进去就用原生 setter 兜底——
+   * 走 setter 而不是直接赋值，React 这类受控组件才能收到 onChange。
+   */
+  async fillAt(x: number, y: number, text: string, expect?: FillTarget): Promise<boolean> {
     await this.tap(x, y)
-    await delay(120)
-    await this.view?.webContents.executeJavaScript(
-      `(() => { const el = document.activeElement
-        if (el && ('value' in el)) { el.value = ''; el.dispatchEvent(new Event('input', {bubbles:true})) }
-        return true })()`,
-      true
-    )
-    await this.send('Input.insertText', { text })
-    // 补一次 input 事件，兼容只监听 keyboard 的实现
-    await this.view?.webContents.executeJavaScript(
-      `(() => { const el = document.activeElement
-        if (el) { el.dispatchEvent(new Event('input', {bubbles:true})); el.dispatchEvent(new Event('change', {bubbles:true})) }
-        return true })()`,
-      true
-    )
+    await delay(150)
+
+    // 只按坐标点会出问题：相邻输入框间距小、点击前后又可能有细微布局变化，
+    // 焦点很容易落到隔壁字段上，然后把内容写错地方还查不出来。
+    // 所以点完先核对焦点身份，不对就按 name/placeholder 精确改焦。
+    const ok = (await this.evalInPage(
+      `(() => {
+        const want = ${JSON.stringify(text)}
+        const expect = ${JSON.stringify(expect ?? null)}
+        const matches = (el) => {
+          if (!el || !('value' in el)) return false
+          if (!expect) return true
+          if (expect.name && (el.getAttribute('name') || el.id) === expect.name) return true
+          if (expect.placeholder && el.getAttribute('placeholder') === expect.placeholder) return true
+          return false
+        }
+        let el = document.activeElement
+        if (!matches(el)) {
+          const all = [...document.querySelectorAll('input,textarea,select')]
+          el = all.find(matches) || document.elementFromPoint(${Math.round(x)}, ${Math.round(y)})
+          if (!matches(el)) return false
+          if (el.focus) el.focus()
+        }
+        const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+        const setter = Object.getOwnPropertyDescriptor(proto, 'value').set
+        setter.call(el, '')
+        setter.call(el, want)
+        el.dispatchEvent(new Event('input', { bubbles: true }))
+        el.dispatchEvent(new Event('change', { bubbles: true }))
+        return el.value === want
+      })()`
+    ).catch(() => false)) as boolean
+
     await delay(200)
+    return ok
   }
 
   /** delta 为正表示向下滚动 */
   async scrollBy(delta: number): Promise<void> {
     if (!this.device) return
+    await this.markAutomating()
     const { x, y } = this.toInput(this.device.width / 2, this.device.height / 2)
     try {
-      await this.send('Input.synthesizeScrollGesture', {
-        x,
-        y,
-        // CDP 的 yDistance 正数表示向上滚，与我们的语义相反
-        yDistance: -delta,
-        speed: 3000,
-        gestureSourceType: this.device.hasTouch ? 'touch' : 'mouse',
-      })
+      await this.send(
+        'Input.synthesizeScrollGesture',
+        {
+          x,
+          y,
+          // CDP 的 yDistance 正数表示向上滚，与我们的语义相反
+          yDistance: -delta,
+          speed: 3000,
+          gestureSourceType: this.device.hasTouch ? 'touch' : 'mouse',
+        },
+        8000
+      )
     } catch {
-      await this.view?.webContents.executeJavaScript(`scrollBy(0, ${delta}); true`, true)
+      await this.evalInPage(`scrollBy(0, ${delta}); true`).catch(() => undefined)
     }
     await delay(400)
   }
 
-  /** 在目标页内执行脚本并取回结果，供探针与自动化测试使用 */
-  async evalInPage(script: string): Promise<unknown> {
+  /**
+   * 在目标页内执行脚本并取回结果。
+   * 必须带超时：页面正在导航时 executeJavaScript 可能永远不返回，
+   * 没有超时的话整个探索循环会静默卡死在某一步。
+   */
+  async evalInPage(script: string, timeoutMs = 8000): Promise<unknown> {
     if (!this.view) throw new Error('预览视图尚未创建')
-    return this.view.webContents.executeJavaScript(script, true)
+    const wc = this.view.webContents
+    return Promise.race([
+      wc.executeJavaScript(script, true),
+      new Promise((_r, reject) => setTimeout(() => reject(new Error('页内脚本执行超时')), timeoutMs)),
+    ])
   }
 
   async blurActive(): Promise<void> {
-    await this.view?.webContents.executeJavaScript(`document.activeElement && document.activeElement.blur(); true`, true)
+    await this.evalInPage(`document.activeElement && document.activeElement.blur(); true`).catch(() => undefined)
     await delay(300)
   }
 
   /* -------------------------------- 内部 -------------------------------- */
 
-  private async send(method: string, params: Record<string, unknown>): Promise<unknown> {
+  /**
+   * 所有 CDP 调用都带超时。
+   * 页面正在导航时，Input.* 与 Emulation.* 可能永远不返回——
+   * 少了这道超时，探索循环会静默卡死在某一步而不报任何错。
+   */
+  private async send(method: string, params: Record<string, unknown>, timeoutMs = 12000): Promise<unknown> {
     const trace = process.env.UFC_TRACE === '1'
     if (trace) console.log(`[cdp] → ${method}`)
     try {
-      const r = await this.dbg.sendCommand(method, params)
+      const r = await Promise.race([
+        this.dbg.sendCommand(method, params),
+        new Promise((_r, reject) => setTimeout(() => reject(new Error(`${method} 超时`)), timeoutMs)),
+      ])
       if (trace) console.log(`[cdp] ✓ ${method}`)
       return r
     } catch (e) {
       if (trace) console.log(`[cdp] ✗ ${method}: ${e instanceof Error ? e.message : String(e)}`)
       throw e
+    }
+  }
+
+  /** 输入类命令允许失败：导航打断属于正常现象，不该让整轮探索报错 */
+  private async sendInput(method: string, params: Record<string, unknown>): Promise<void> {
+    try {
+      await this.send(method, params, 6000)
+    } catch (e) {
+      if (process.env.UFC_TRACE === '1') console.log(`[cdp] input ignored: ${e instanceof Error ? e.message : String(e)}`)
     }
   }
 }
