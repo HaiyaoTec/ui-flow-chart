@@ -37,13 +37,15 @@ const NO_PROGRESS_LIMIT = 6
 const CAPTCHA_IFRAME = /captcha|recaptcha|hcaptcha|turnstile|geetest|arkoselabs/i
 /** URL 路径特征 */
 const CAPTCHA_URL = /captcha|challenge|verify-human/i
-/**
- * 正文特征只认「图形/滑动验证」这类明确表述。
- * 不能只匹配「验证码」——正常的短信验证码表单里到处都是这三个字，
- * 一匹配就会把普通表单误判成需要真人介入。
- */
-const CAPTCHA_TEXT = /图形验证|滑动验证|拖动滑块|按顺序点击|点击下方图形|recaptcha|hcaptcha|i'm not a robot/i
 const PAYMENT_HINTS = /paypal|stripe|checkout|payment|收银台/i
+
+/**
+ * 刻意不做正文关键词匹配。
+ * 「图形验证」「验证码」这类词在正常页面的说明文字里也很常见，
+ * 一匹配就会把普通表单误判成需要真人介入。AI 能看到截图，
+ * 判断「这是不是一道人机验证」比正则准得多，交给它输出 need_human 即可；
+ * 启发式只负责 AI 看不见的部分：跨域 iframe 与 URL 特征。
+ */
 
 /**
  * 探索会话状态机。
@@ -70,6 +72,7 @@ export class ExplorerSession {
   private stopRequested = false
   private pauseRequested = false
   private takeoverRequested = false
+  private takeoverEndRequested = false
   private watcher: WatchRecorder | null = null
 
   /** 签名 → 访问次数，用于循环检测 */
@@ -169,6 +172,9 @@ export class ExplorerSession {
   }
 
   async takeoverEnd(): Promise<SessionSnapshot> {
+    // 用标志位而不是只调 watcher.stop()：结束请求可能早于录制器创建，
+    // 那时 stop() 是空操作，会话就永远停在等待人工上
+    this.takeoverEndRequested = true
     this.watcher?.stop()
     return this.snapshot()
   }
@@ -534,10 +540,10 @@ export class ExplorerSession {
   private async runTakeover(): Promise<void> {
     const store = this.store!
     this.takeoverRequested = false
+    this.takeoverEndRequested = false
     this.setState('awaiting_human', this.reason)
     await this.deps.driver.clearUserInput()
 
-    let ended = false
     this.watcher = new WatchRecorder(this.deps.driver, store, {
       lane: 'manual',
       laneTitle: '人工接管',
@@ -545,9 +551,8 @@ export class ExplorerSession {
       onPatch: (lanes, nodes, edges) => this.deps.emitPatch(lanes, nodes, edges),
     })
 
-    const stopWatch = () => ended || this.stopRequested
+    const stopWatch = () => this.takeoverEndRequested || this.stopRequested
     const result = await this.watcher.run(this.currentNodeId, stopWatch)
-    ended = true
     this.watcher = null
 
     this.screens += result.nodes.length
@@ -568,7 +573,6 @@ export class ExplorerSession {
   private detectHumanNeeded(probe: ProbeResult): string | null {
     if (probe.iframeHosts.some((h) => CAPTCHA_IFRAME.test(h))) return '页面包含第三方验证码 iframe，需要真人完成'
     if (CAPTCHA_URL.test(new URL(probe.url, 'http://x').pathname)) return '已进入验证页面，需要真人完成'
-    if (CAPTCHA_TEXT.test(probe.text.slice(0, 600))) return '页面出现图形/滑动验证，需要真人完成'
     if (PAYMENT_HINTS.test(probe.url)) return '已进入支付相关页面，交由真人处理'
     return null
   }

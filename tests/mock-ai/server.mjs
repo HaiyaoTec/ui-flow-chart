@@ -12,6 +12,8 @@ const SCENARIO = process.argv[3] || 'normal'
 
 /** 每个页面推进到第几步 */
 const progress = new Map()
+/** 每个页面已经填过哪些字段 */
+const filled = new Map()
 let callCount = 0
 
 /** 从提示文本里还原可交互元素清单 */
@@ -129,13 +131,44 @@ function decide(text) {
   }
 
   if (path.endsWith('login.html')) {
+    const phone = find(els, /手机号/)
+    const pwd = find(els, /密码/)
     const submit = els.find((e) => e.tag.startsWith('button'))
+    const notices = noticesOf(text)
+
+    // 登录页只在提交时校验，提示不会因为填写而消失。
+    // 所以要自己记住填过什么，否则会照着过期的提示反复重填。
+    if (!filled.has(path)) filled.set(path, new Set())
+    const done = filled.get(path)
+
+    if (/手机号不能为空/.test(notices) && phone && !done.has('phone')) {
+      done.add('phone')
+      return {
+        action: 'fill',
+        targetIdx: phone.idx,
+        value: '13800138000',
+        reason: '补齐手机号',
+        screen: screen('login-empty-submit', '登录·必填项未填校验', 'login', '登录', 'validation'),
+        edgeLabel: '提交「登录」→ 系统校验失败',
+      }
+    }
+    if (/密码不能为空/.test(notices) && pwd && !done.has('pwd')) {
+      done.add('pwd')
+      return {
+        action: 'fill',
+        targetIdx: pwd.idx,
+        value: 'test123456',
+        reason: '补齐密码',
+        screen: screen('login-phone-filled', '登录·手机号已填', 'login', '登录'),
+        edgeLabel: '输入手机号',
+      }
+    }
     return {
       action: 'click',
       targetIdx: submit ? submit.idx : 0,
       reason: '提交登录',
       screen: screen('login-init', '登录表单', 'login', '登录'),
-      edgeLabel: '切换到登录',
+      edgeLabel: '打开登录页',
     }
   }
 

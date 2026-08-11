@@ -16,6 +16,8 @@ import { join } from 'node:path'
 export async function runExploreCheck(win: BrowserWindow, site: string, aiBase: string): Promise<void> {
   const out: Record<string, unknown> = {}
   let projectId = ''
+  // takeover 场景从登录页起步，会撞上验证码并转人工
+  const takeover = process.env.UFC_SCENARIO === 'takeover'
 
   try {
     preview.bindWindow(win)
@@ -29,22 +31,46 @@ export async function runExploreCheck(win: BrowserWindow, site: string, aiBase: 
 
     const project = createProject({
       name: '自检项目',
-      targetUrl: `${site}/index.html`,
+      targetUrl: takeover ? `${site}/login.html` : `${site}/index.html`,
       deviceId: 'iphone-14-pro-max',
       aiProfileId: profile.id,
-      goal: '走通注册流程，覆盖手机号格式校验',
+      goal: takeover ? '走通登录流程' : '走通注册流程，覆盖手机号格式校验',
     })
     projectId = project.id
 
     await sessions.start(project.id)
 
-    // 等到进入终态或需要人工
-    const deadline = Date.now() + 120_000
-    let snap: SessionSnapshot = sessions.snapshot()
-    while (Date.now() < deadline) {
-      snap = sessions.snapshot()
-      if (['finished', 'failed', 'paused', 'awaiting_human'].includes(snap.state)) break
-      await delay(500)
+    const waitFor = async (states: string[], ms: number): Promise<SessionSnapshot> => {
+      const end = Date.now() + ms
+      let s = sessions.snapshot()
+      while (Date.now() < end) {
+        s = sessions.snapshot()
+        if (states.includes(s.state)) break
+        await delay(400)
+      }
+      return s
+    }
+
+    let snap = await waitFor(['finished', 'failed', 'paused', 'awaiting_human'], 120_000)
+
+    if (takeover && snap.state === 'awaiting_human') {
+      out.needHuman = snap.reason
+      // 模拟真人：在验证码页按对图形（脚本无法从截图判断，必须真人操作）
+      const pt = (await preview.driver.evalInPage(
+        `(() => { const b = document.querySelectorAll('#shapes button')[2]
+           if (!b) return null
+           const r = b.getBoundingClientRect()
+           return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) } })()`
+      )) as { x: number; y: number } | null
+      if (pt) {
+        await preview.driver.tap(pt.x, pt.y)
+        await delay(2500)
+      }
+      out.afterHumanUrl = preview.driver.currentUrl()
+
+      await sessions.takeoverEnd()
+      snap = await waitFor(['finished', 'failed', 'paused'], 60_000)
+      out.afterTakeover = { state: snap.state, step: snap.step, screens: snap.screens }
     }
     out.session = { state: snap.state, step: snap.step, aiCalls: snap.aiCalls, screens: snap.screens, reason: snap.reason }
 

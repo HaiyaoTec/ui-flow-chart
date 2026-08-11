@@ -21,6 +21,7 @@ Start-Sleep -Seconds 2
 
 $env:UFC_TEST = '1'
 $env:UFC_SELFCHECK_EXPLORE = '1'
+$env:UFC_SCENARIO = $Scenario
 $env:UFC_SITE = 'http://localhost:4183'
 $env:UFC_AI = 'http://localhost:4192/v1'
 $out = & node_modules\.bin\electron.cmd . 2>&1
