@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>安全验证</title>
+<link rel="stylesheet" href="/site.css">
+</head>
+<body>
+<h1>安全验证</h1>
+<p class="sub">请按顺序点击下方图形中的「三角形」以完成验证。</p>
+
+<div id="captcha" style="background:#1c1f27;border:1px solid #2a2f3a;border-radius:12px;padding:24px;text-align:center">
+  <div style="font-size:13px;color:#8f97a8;margin-bottom:14px">captcha challenge · recaptcha-like</div>
+  <div class="grid" id="shapes"></div>
+  <div class="err" id="msg" style="text-align:center"></div>
+</div>
+
+<a class="btn ghost" href="/login.html" style="margin-top:18px">返回登录</a>
+
+<script>
+// 只有点中三角形才通过：脚本无法从截图判断，必须真人看图操作
+const shapes = ['●', '■', '▲', '■', '●', '■', '●', '▲', '■']
+const target = 2
+const box = document.getElementById('shapes')
+shapes.forEach((s, i) => {
+  const b = document.createElement('button')
+  b.textContent = s
+  b.style.fontSize = '22px'
+  b.addEventListener('click', () => {
+    if (i === target) {
+      document.getElementById('msg').innerHTML = '<span class="ok">验证通过，正在跳转…</span>'
+      setTimeout(() => (location.href = '/success.html?from=login'), 600)
+    } else {
+      document.getElementById('msg').textContent = '验证失败，请重试'
+    }
+  })
+  box.appendChild(b)
+})
+</script>
+</body>
+</html>

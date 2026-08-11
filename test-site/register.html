@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>注册</title>
+<link rel="stylesheet" href="/site.css">
+</head>
+<body>
+<h1>创建账号</h1>
+<p class="sub">带前端校验的注册表单，用于产出校验态界面。</p>
+
+<form id="f" novalidate>
+  <div class="field">
+    <label>手机号</label>
+    <input id="phone" name="phone" placeholder="请输入手机号" inputmode="numeric">
+    <div class="err" id="e-phone"></div>
+  </div>
+  <div class="field">
+    <label>密码</label>
+    <input id="pwd" name="password" type="password" placeholder="6-20 位">
+    <div class="err" id="e-pwd"></div>
+  </div>
+  <div class="field">
+    <label>确认密码</label>
+    <input id="pwd2" name="confirm" type="password" placeholder="再次输入密码">
+    <div class="err" id="e-pwd2"></div>
+  </div>
+  <button type="submit">注册</button>
+  <a class="btn ghost" href="/login.html">已有账号，去登录</a>
+</form>
+
+<script>
+const $ = (id) => document.getElementById(id)
+function validate() {
+  let ok = true
+  const phone = $('phone').value.trim()
+  if (!phone) { $('e-phone').textContent = '手机号不能为空'; ok = false }
+  else if (!/^\d{8,13}$/.test(phone)) { $('e-phone').textContent = '手机号长度需为 8-13 位数字'; ok = false }
+  else $('e-phone').textContent = ''
+
+  const pwd = $('pwd').value
+  if (!pwd) { $('e-pwd').textContent = '密码不能为空'; ok = false }
+  else if (pwd.length < 6 || pwd.length > 20) { $('e-pwd').textContent = '密码需 6-20 位'; ok = false }
+  else $('e-pwd').textContent = ''
+
+  const pwd2 = $('pwd2').value
+  if (pwd2 !== pwd) { $('e-pwd2').textContent = '两次输入的密码不一致'; ok = false }
+  else $('e-pwd2').textContent = ''
+
+  return ok
+}
+;['phone','pwd','pwd2'].forEach(id => $(id).addEventListener('blur', validate))
+$('f').addEventListener('submit', (e) => {
+  e.preventDefault()
+  if (validate()) location.href = '/success.html?from=register'
+})
+</script>
+</body>
+</html>

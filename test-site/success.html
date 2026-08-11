@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>操作成功</title>
+<link rel="stylesheet" href="/site.css">
+</head>
+<body>
+<h1 class="ok">操作成功</h1>
+<p class="sub" id="from"></p>
+<div style="background:#1c1f27;border:1px solid #2a2f3a;border-radius:12px;padding:20px">
+  <table>
+    <tr><td>账户</td><td><code>demo_user</code></td></tr>
+    <tr><td>余额</td><td><code>￥0.00</code></td></tr>
+    <tr><td>状态</td><td><code>已登录</code></td></tr>
+  </table>
+</div>
+<a class="btn ghost" href="/" style="margin-top:18px">返回首页</a>
+<script>
+const from = new URLSearchParams(location.search).get('from')
+document.getElementById('from').textContent = from === 'register' ? '注册完成，已自动登录。' : '登录完成。'
+</script>
+</body>
+</html>

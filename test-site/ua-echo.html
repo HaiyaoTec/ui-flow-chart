@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>设备模拟自检</title>
+<link rel="stylesheet" href="/site.css">
+</head>
+<body>
+<h1>设备模拟自检</h1>
+<p class="sub">这些值必须与所选设备一致，否则说明 override 没在导航前生效。</p>
+
+<table id="t"></table>
+<div id="verdict" style="margin-top:16px;font-size:14px"></div>
+<a class="btn ghost" href="/" style="margin-top:18px">返回首页</a>
+
+<script>
+const nav = navigator
+const rows = [
+  ['User-Agent', nav.userAgent],
+  ['平台 platform', nav.platform],
+  ['视口 innerWidth×innerHeight', innerWidth + ' × ' + innerHeight],
+  ['屏幕 screen.width×height', screen.width + ' × ' + screen.height],
+  ['devicePixelRatio', String(devicePixelRatio)],
+  ['maxTouchPoints', String(nav.maxTouchPoints)],
+  ['ontouchstart 存在', String('ontouchstart' in window)],
+  ['matchMedia pointer:coarse', String(matchMedia('(pointer: coarse)').matches)],
+  ['userAgentData.mobile', nav.userAgentData ? String(nav.userAgentData.mobile) : '(不支持)'],
+  ['userAgentData.platform', nav.userAgentData ? nav.userAgentData.platform : '(不支持)'],
+  ['userAgentData.brands', nav.userAgentData ? nav.userAgentData.brands.map(b => b.brand).join(', ') || '(空)' : '(不支持)'],
+  ['文档 scrollWidth', String(document.documentElement.scrollWidth)],
+  ['语言 language', nav.language],
+]
+document.getElementById('t').innerHTML = rows
+  .map(([k, v]) => '<tr><td>' + k + '</td><td><code id="v-' + k.replace(/[^a-zA-Z]/g, '') + '">' + v + '</code></td></tr>')
+  .join('')
+
+// 供自动化断言直接读取
+window.__deviceInfo = {
+  ua: nav.userAgent,
+  width: innerWidth,
+  height: innerHeight,
+  dpr: devicePixelRatio,
+  touch: nav.maxTouchPoints > 0,
+  coarse: matchMedia('(pointer: coarse)').matches,
+  mobile: nav.userAgentData ? nav.userAgentData.mobile : null,
+  scrollWidth: document.documentElement.scrollWidth,
+}
+
+const isMobileUa = /iPhone|iPad|Android/i.test(nav.userAgent)
+document.getElementById('verdict').innerHTML = isMobileUa
+  ? '<span class="ok">✓ 当前是移动 UA</span>'
+  : '<span style="color:#e05561">✗ 当前是桌面 UA</span>'
+</script>
+</body>
+</html>

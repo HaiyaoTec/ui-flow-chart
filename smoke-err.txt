@@ -1,0 +1,1 @@
+[30348:0811/124902.364:WARNING:process_singleton_win.cc(158)] Invalid format for start command, we need a string in 6 parts separated by NULLs

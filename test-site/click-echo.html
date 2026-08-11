@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>输入坐标自检</title>
+<link rel="stylesheet" href="/site.css">
+</head>
+<body>
+<h1>输入坐标自检</h1>
+<p class="sub">点任意格子。若命中的格子与手指位置一致，说明缩放下的坐标换算没有偏移。</p>
+
+<div class="grid" id="grid"></div>
+<div id="result">尚未点击</div>
+
+<div class="field" style="margin-top:20px">
+  <label>输入回显（验证 insertText 通路）</label>
+  <input id="echo" placeholder="在这里输入">
+  <div class="err" id="echoOut"></div>
+</div>
+
+<a class="btn ghost" href="/" style="margin-top:18px">返回首页</a>
+
+<script>
+window.__lastHit = null
+window.__hits = []
+const grid = document.getElementById('grid')
+for (let i = 1; i <= 9; i++) {
+  const b = document.createElement('button')
+  b.textContent = '格子 ' + i
+  b.dataset.idx = String(i)
+  b.addEventListener('click', (e) => {
+    const r = b.getBoundingClientRect()
+    const hit = {
+      idx: i,
+      // 事件坐标与元素中心的偏差，超过半个格子就说明有换算错位
+      dx: Math.round(e.clientX - (r.x + r.width / 2)),
+      dy: Math.round(e.clientY - (r.y + r.height / 2)),
+      clientX: Math.round(e.clientX),
+      clientY: Math.round(e.clientY),
+      trusted: e.isTrusted,
+      pointerType: e.pointerType || '',
+    }
+    window.__lastHit = hit
+    window.__hits.push(hit)
+    document.getElementById('result').innerHTML =
+      '<span class="ok">命中格子 ' + i + '</span>　偏差 dx=' + hit.dx + ' dy=' + hit.dy +
+      '　isTrusted=' + hit.trusted
+  })
+  grid.appendChild(b)
+}
+
+const echo = document.getElementById('echo')
+echo.addEventListener('input', () => {
+  window.__echoValue = echo.value
+  document.getElementById('echoOut').textContent = '已收到 ' + echo.value.length + ' 个字符'
+})
+</script>
+</body>
+</html>

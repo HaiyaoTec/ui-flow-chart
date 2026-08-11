@@ -1,0 +1,109 @@
+/**
+ * 注入页面执行的探针。以字符串形式保存，通过 executeJavaScript 送进目标页。
+ *
+ * 从既有实现移植并做了两处升级：
+ * 1. 可交互元素改为带 idx 的清单——AI 用 idx 指目标，执行器按同一枚举顺序重查元素，
+ *    顺序对不上就判为 stale 并重新探针，避免点错。
+ * 2. 增加 iframeHosts，用于识别验证码/支付这类探针读不到的跨域盲区。
+ */
+export const PROBE_SCRIPT = `(() => {
+  const isVis = (el) => {
+    const r = el.getBoundingClientRect()
+    if (r.width < 2 || r.height < 2) return false
+    const s = getComputedStyle(el)
+    if (s.visibility === 'hidden' || s.display === 'none' || Number(s.opacity) === 0) return false
+    return r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth
+  }
+  const txt = (el) => ((el && el.innerText) || '').replace(/\\s+/g, ' ').trim()
+  const zIndexOf = (el) => {
+    let z = 0
+    for (let n = el; n && n !== document.body; n = n.parentElement) {
+      const v = parseInt(getComputedStyle(n).zIndex, 10)
+      if (!Number.isNaN(v)) z = Math.max(z, v)
+    }
+    return z
+  }
+
+  // 顶层弹窗优先：有弹窗时把探测范围收敛进去，避免把背后页面的控件也报上来
+  const dialogSel = '[role="dialog"],[class*="modal" i],[class*="Modal"],[class*="dialog" i],[class*="Dialog"],[class*="popup" i],[class*="Popup"],[class*="drawer" i],[class*="Drawer"]'
+  const cands = [...document.querySelectorAll(dialogSel)].filter(isVis).filter((el) => el.getBoundingClientRect().height > 120)
+  const withCtrl = cands.filter((el) => el.querySelector('input,button'))
+  const pool = withCtrl.length ? withCtrl : cands
+  const inner = pool.filter((el, _i, arr) => !arr.some((o) => o !== el && el.contains(o)))
+  const ranked = (inner.length ? inner : pool).sort((a, b) => zIndexOf(a) - zIndexOf(b) || txt(a).length - txt(b).length)
+  const top = ranked.length ? ranked[ranked.length - 1] : null
+  const scope = top || document.body
+
+  const SEL = 'a,button,input,textarea,select,label,[role="button"],[role="tab"],[role="checkbox"],[onclick]'
+  const seen = new Set()
+  const elements = []
+  for (const el of scope.querySelectorAll(SEL)) {
+    if (!isVis(el)) continue
+    // 控件套控件时只取最内层，避免同一个按钮报两遍
+    if ([...seen].some((s) => s.contains(el))) continue
+    const r = el.getBoundingClientRect()
+    const tag = el.tagName.toLowerCase()
+    const type = (el.getAttribute('type') || '').toLowerCase()
+    const label = txt(el).slice(0, 60)
+    const ph = (el.getAttribute('placeholder') || '').slice(0, 60)
+    const name = (el.getAttribute('name') || el.id || '').slice(0, 40)
+    if (!label && !ph && !name && tag !== 'input' && tag !== 'select' && tag !== 'textarea') continue
+    seen.add(el)
+    elements.push({
+      idx: elements.length,
+      tag,
+      type,
+      text: label,
+      placeholder: ph,
+      name,
+      rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
+      disabled: Boolean(el.disabled) || el.getAttribute('aria-disabled') === 'true',
+      checked: type === 'checkbox' || type === 'radio' ? Boolean(el.checked) : undefined,
+    })
+    if (elements.length >= 120) break
+  }
+
+  // 偏红色系的叶子文本 = 校验/错误提示
+  const notices = [...scope.querySelectorAll('*')]
+    .filter((el) => el.children.length === 0 && isVis(el))
+    .filter((el) => {
+      const m = getComputedStyle(el).color.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/)
+      if (!m) return false
+      return +m[1] > 150 && +m[2] < 120 && +m[3] < 120
+    })
+    .map(txt)
+    .filter(Boolean)
+
+  const iframeHosts = [...document.querySelectorAll('iframe')]
+    .filter(isVis)
+    .map((f) => {
+      try { return new URL(f.src, location.href).host } catch { return '' }
+    })
+    .filter((h) => h && h !== location.host)
+
+  return {
+    url: location.href,
+    title: document.title,
+    hasDialog: !!top,
+    dialogClass: top ? String(top.className).slice(0, 160) : '',
+    text: txt(scope).slice(0, 1500),
+    elements,
+    notices: [...new Set(notices)].slice(0, 12),
+    iframeHosts: [...new Set(iframeHosts)].slice(0, 8),
+    scrollY: Math.round(scrollY),
+    scrollHeight: Math.round(document.documentElement.scrollHeight),
+    viewportHeight: innerHeight,
+    bodyClass: String(document.body.className).slice(0, 120),
+    scrollWidth: document.documentElement.scrollWidth,
+  }
+})()`
+
+/** 等图片解码完成，避免拍到图还没加载的中间态 */
+export const WAIT_IMAGES_SCRIPT = `(async () => {
+  const imgs = [...document.images].filter((i) => !i.complete)
+  await Promise.race([
+    Promise.all(imgs.map((i) => new Promise((r) => { i.onload = i.onerror = r }))),
+    new Promise((r) => setTimeout(r, 3000)),
+  ])
+  return true
+})()`

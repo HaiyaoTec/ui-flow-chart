@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>登录</title>
+<link rel="stylesheet" href="/site.css">
+</head>
+<body>
+<h1>登录</h1>
+<p class="sub">提交后会进入图形验证码页——这是设计好的「需要真人介入」环节。</p>
+
+<form id="f" novalidate>
+  <div class="field">
+    <label>手机号</label>
+    <input id="phone" name="phone" placeholder="请输入手机号" inputmode="numeric">
+    <div class="err" id="e-phone"></div>
+  </div>
+  <div class="field">
+    <label>密码</label>
+    <input id="pwd" name="password" type="password" placeholder="请输入密码">
+    <div class="err" id="e-pwd"></div>
+  </div>
+  <button type="submit">登录</button>
+  <a class="btn ghost" href="/register.html">还没有账号，去注册</a>
+</form>
+
+<script>
+const $ = (id) => document.getElementById(id)
+$('f').addEventListener('submit', (e) => {
+  e.preventDefault()
+  let ok = true
+  if (!$('phone').value.trim()) { $('e-phone').textContent = '手机号不能为空'; ok = false } else $('e-phone').textContent = ''
+  if (!$('pwd').value) { $('e-pwd').textContent = '密码不能为空'; ok = false } else $('e-pwd').textContent = ''
+  if (ok) location.href = '/captcha.html'
+})
+</script>
+</body>
+</html>
