@@ -1,0 +1,63 @@
+.theme-menu {
+  position: relative;
+}
+
+.theme-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border-color: transparent;
+  padding: 7px 10px;
+}
+.theme-trigger:hover {
+  background: var(--panel-2);
+  border-color: var(--line);
+}
+.theme-trigger .grow,
+.theme-pop .grow {
+  flex: 1;
+}
+.theme-trigger .caret {
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+}
+.theme-menu .icon {
+  width: 16px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.theme-pop {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 50;
+  padding: 5px;
+  border-radius: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+.theme-pop button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border-color: transparent;
+  padding: 7px 9px;
+}
+.theme-pop button:hover {
+  background: var(--panel-2);
+  border-color: transparent;
+}
+.theme-pop .check {
+  color: var(--accent);
+  font-weight: 700;
+}

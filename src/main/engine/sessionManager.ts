@@ -1,4 +1,4 @@
-import type { BrowserWindow } from 'electron'
+import { Notification, type BrowserWindow } from 'electron'
 import { getDevice } from '@shared/devices'
 import { CH } from '@shared/ipc-contract'
 import type { FlowEdge, FlowLane, FlowNode, SessionBudgets, SessionSnapshot } from '@shared/types'
@@ -20,6 +20,28 @@ class SessionManager {
     if (this.win && !this.win.isDestroyed()) this.win.webContents.send(channel, payload)
   }
 
+  /**
+   * 探索是在后台跑的，用户可能已经切走或最小化了窗口。
+   * 需要真人介入时必须主动叫人，否则会一直干等着。
+   */
+  private alertHuman(projectName: string, reason: string): void {
+    this.notify(`${projectName} 需要你介入`, reason)
+    if (this.win && !this.win.isDestroyed() && !this.win.isFocused()) {
+      this.win.flashFrame(true)
+      // 窗口一被聚焦就停掉任务栏闪烁
+      this.win.once('focus', () => this.win?.flashFrame(false))
+    }
+  }
+
+  private notify(title: string, body: string): void {
+    if (process.env.UFC_TEST === '1') return
+    try {
+      if (Notification.isSupported()) new Notification({ title, body }).show()
+    } catch {
+      // 系统未开通知权限时忽略即可
+    }
+  }
+
   private ensure(projectId: string): ExplorerSession {
     const meta = getProject(projectId)
     if (!meta) throw new Error('项目不存在')
@@ -31,7 +53,11 @@ class SessionManager {
       openTarget: async (url) => {
         await preview.open(url, getDevice(meta.deviceId, meta.customDevice), partitionOf(meta.id))
       },
-      emit: (event, snapshot) => this.send(CH.evSession, { ...event, snapshot }),
+      emit: (event, snapshot) => {
+        this.send(CH.evSession, { ...event, snapshot })
+        if (event.kind === 'need-human') this.alertHuman(meta.name, event.reason)
+        if (event.kind === 'finished') this.notify(`${meta.name} 探索完成`, `共 ${snapshot.screens} 屏、${snapshot.step} 步`)
+      },
       emitPatch: (lanes: FlowLane[], nodes: FlowNode[], edges: FlowEdge[]) =>
         this.send(CH.evGraphPatch, { addedLanes: lanes, addedNodes: nodes, addedEdges: edges }),
     })

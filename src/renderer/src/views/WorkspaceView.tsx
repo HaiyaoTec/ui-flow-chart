@@ -3,37 +3,52 @@ import { getDevice } from '@shared/devices'
 import { CH } from '@shared/ipc-contract'
 import FlowCanvas from '../components/canvas/FlowCanvas'
 import PreviewPane from '../components/preview/PreviewPane'
-import { invoke, on } from '../ipc'
+import { invoke } from '../ipc'
 import { useApp } from '../state/store'
+import { STATE_LABEL } from './stateLabel'
 import './workspace.css'
 
 const RUNNING = ['launching', 'observing', 'thinking', 'acting', 'resuming']
 
-export default function WorkspaceView({ onBack }: { onBack: () => void }) {
-  const { project, graph, session, logs, newNodeIds, applyPatch, pushEvent, setSession } = useApp()
-  const [exporting, setExporting] = useState('')
-  const logRef = useRef<HTMLDivElement>(null)
+/** 画布与预览的空间分配。人工接管时预览必须够大，否则根本点不动 */
+type Layout = 'canvas' | 'split' | 'preview'
 
-  useEffect(() => {
-    const offPatch = on(CH.evGraphPatch, applyPatch)
-    const offEvent = on(CH.evSession, pushEvent)
-    void invoke(CH.sessionSnapshot).then(setSession)
-    return () => {
-      offPatch()
-      offEvent()
-    }
-  }, [applyPatch, pushEvent, setSession])
+const LAYOUT_LABEL: Record<Layout, string> = {
+  canvas: '画布为主',
+  split: '左右均分',
+  preview: '预览为主',
+}
+
+export default function WorkspaceView({ onBack }: { onBack: () => void }) {
+  const { project, graph, session, logs, newNodeIds, setSession } = useApp()
+  const [exporting, setExporting] = useState('')
+  const [layout, setLayout] = useState<Layout>('canvas')
+  // 用户手动调过布局后就不再自动切换，避免跟人抢方向盘
+  const layoutPinned = useRef(false)
+  const logRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight })
   }, [logs.length])
 
+  const state = session?.state ?? 'idle'
+
+  // 进入等待人工时自动让位给预览，接管结束再还给画布
+  useEffect(() => {
+    if (layoutPinned.current) return
+    setLayout(state === 'awaiting_human' ? 'preview' : 'canvas')
+  }, [state])
+
   if (!project || !graph) return null
 
-  const state = session?.state ?? 'idle'
   const running = RUNNING.includes(state)
   const waitingHuman = state === 'awaiting_human'
   const device = getDevice(project.deviceId, project.customDevice)
+
+  function pickLayout(next: Layout) {
+    layoutPinned.current = true
+    setLayout(next)
+  }
 
   async function start() {
     setSession(await invoke(CH.sessionStart, { projectId: project!.id, goal: project!.goal }))
@@ -57,13 +72,15 @@ export default function WorkspaceView({ onBack }: { onBack: () => void }) {
   return (
     <div className="workspace">
       <div className="ws-bar">
-        <button onClick={onBack}>← 项目</button>
+        <button onClick={onBack} title="返回项目列表，探索会继续在后台运行">
+          <span className="emoji">⬅️</span>项目
+        </button>
         <strong>{project.name}</strong>
         <span className="muted mono" style={{ fontSize: 11.5 }}>
           {project.targetUrl} · {device.name}
         </span>
 
-        <span className={`state-chip ${state}`}>{stateLabel(state)}</span>
+        <span className={`state-chip ${state}`}>{STATE_LABEL[state] ?? state}</span>
         {session && (
           <span className="muted" style={{ fontSize: 11.5 }}>
             {session.step}/{session.budgets.maxSteps} 步 · {session.aiCalls} 次调用 · {session.screens} 屏
@@ -72,32 +89,51 @@ export default function WorkspaceView({ onBack }: { onBack: () => void }) {
 
         <span className="grow" />
 
+        <span className="layout-switch">
+          {(Object.keys(LAYOUT_LABEL) as Layout[]).map((k) => (
+            <button key={k} className={layout === k ? 'on' : ''} onClick={() => pickLayout(k)}>
+              {LAYOUT_LABEL[k]}
+            </button>
+          ))}
+        </span>
+
+
         {state === 'idle' || state === 'finished' || state === 'failed' ? (
           <button className="primary" onClick={start}>
-            开始探索
+            <span className="emoji">▶️</span>开始探索
           </button>
         ) : null}
-        {running && <button onClick={() => void invoke(CH.sessionPause).then(setSession)}>暂停</button>}
-        {state === 'paused' && (
-          <button className="primary" onClick={() => void invoke(CH.sessionResume).then(setSession)}>
-            继续
+        {running && (
+          <button onClick={() => void invoke(CH.sessionPause).then(setSession)}>
+            <span className="emoji">⏸️</span>暂停
           </button>
         )}
-        {running && <button onClick={() => void invoke(CH.sessionTakeoverStart).then(setSession)}>我来接管</button>}
+        {state === 'paused' && (
+          <button className="primary" onClick={() => void invoke(CH.sessionResume).then(setSession)}>
+            <span className="emoji">▶️</span>继续
+          </button>
+        )}
+        {running && (
+          <button onClick={() => void invoke(CH.sessionTakeoverStart).then(setSession)}>
+            <span className="emoji">✋</span>我来接管
+          </button>
+        )}
         {waitingHuman && (
           <button className="primary" onClick={() => void invoke(CH.sessionTakeoverEnd).then(setSession)}>
-            结束接管
+            <span className="emoji">✅</span>结束接管
           </button>
         )}
         {(running || state === 'paused' || waitingHuman) && (
           <button className="danger" onClick={() => void invoke(CH.sessionStop).then(setSession)}>
-            结束
+            <span className="emoji">⏹️</span>结束
           </button>
         )}
         <button onClick={() => void doExport('html')} disabled={Boolean(exporting)}>
+          <span className="emoji">📄</span>
           {exporting === 'html' ? '导出中…' : '导出 HTML'}
         </button>
         <button onClick={() => void doExport('png')} disabled={Boolean(exporting)}>
+          <span className="emoji">🖼️</span>
           {exporting === 'png' ? '导出中…' : '导出 PNG'}
         </button>
       </div>
@@ -113,7 +149,7 @@ export default function WorkspaceView({ onBack }: { onBack: () => void }) {
         </div>
       )}
 
-      <div className="ws-body">
+      <div className={`ws-body layout-${layout}`}>
         <div className="ws-canvas">
           <FlowCanvas graph={graph} projectId={project.id} device={device} newNodeIds={newNodeIds} />
         </div>
@@ -134,19 +170,3 @@ export default function WorkspaceView({ onBack }: { onBack: () => void }) {
   )
 }
 
-function stateLabel(s: string): string {
-  const map: Record<string, string> = {
-    idle: '空闲',
-    launching: '启动中',
-    observing: '观察界面',
-    thinking: 'AI 决策中',
-    acting: '执行操作',
-    paused: '已暂停',
-    awaiting_human: '等待人工',
-    resuming: '恢复中',
-    finishing: '收尾中',
-    finished: '已完成',
-    failed: '已中断',
-  }
-  return map[s] ?? s
-}

@@ -1,6 +1,7 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, nativeTheme } from 'electron'
 import { registerIpc } from './ipc/registry'
 import { registerUfcProtocol, registerUfcSchemePrivileges } from './protocol'
+import { getSettings } from './store/settings'
 import { createMainWindow } from './window'
 
 // 必须在 app ready 之前声明，之后再注册就晚了
@@ -24,6 +25,8 @@ if (!singleInstance) {
 
   void app.whenReady().then(async () => {
     registerUfcProtocol()
+    // 启动就把上次选的主题装回去，避免开窗后闪一下再切
+    nativeTheme.themeSource = getSettings().theme
     mainWindow = createMainWindow()
     registerIpc(() => mainWindow)
 

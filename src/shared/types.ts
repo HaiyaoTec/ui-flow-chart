@@ -297,7 +297,8 @@ export interface AppSettings {
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  theme: 'dark',
+  // 默认跟随操作系统
+  theme: 'system',
   defaultDeviceId: 'iphone-14-pro-max',
   defaultGoal: '走通注册与登录的完整流程，覆盖主干路径与关键的表单校验提示界面，并探索忘记密码等找回路径。',
 }

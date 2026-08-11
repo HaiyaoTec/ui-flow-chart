@@ -1,5 +1,5 @@
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
-import { evalPreview, ipc, launchApp, siteRequests, startTestSite, TEST_SITE, waitFor } from './helpers'
+import { evalPreview, ipc, launchApp, siteRequests, startTestSite, TEST_SITE, TEST_SITE_PORT, waitFor } from './helpers'
 
 let stopSite: () => void
 let app: ElectronApplication
@@ -125,6 +125,91 @@ test('截图输出设备原始分辨率，缩放不影响存档质量', async ()
   const size = await evalPreview<{ w: number; h: number }>(window, '({ w: innerWidth, h: innerHeight })')
   expect(size.w).toBe(430)
   expect(size.h).toBe(932)
+})
+
+test('跨源导航后设备模拟必须仍然生效', async () => {
+  // localhost 与 127.0.0.1 是不同的源，会触发跨进程导航。
+  // Chromium 在换 RenderFrameHost 时可能丢掉 Emulation 覆盖，
+  // 一旦丢了就会拿到 PC 布局塞进手机视口——必须在导航后补上。
+  const info1 = await openUaEcho('iphone-14-pro-max')
+  expect(info1.width).toBe(430)
+
+  await ipc(window, 'preview:navigate', { url: `http://127.0.0.1:${TEST_SITE_PORT}/ua-echo.html` })
+  await waitFor(async () => {
+    const u = await evalPreview<string>(window, 'location.host')
+    return typeof u === 'string' && u.startsWith('127.0.0.1')
+  }, 20000)
+  await window.waitForTimeout(1200)
+
+  const info2 = await evalPreview<DeviceInfo>(window, 'window.__deviceInfo')
+  expect(info2.ua, '跨源导航后 UA 仍应是移动端').toMatch(/iPhone/)
+  expect(info2.width, '跨源导航后视口仍应是 430').toBe(430)
+  expect(info2.height).toBe(932)
+  expect(info2.touch).toBe(true)
+  expect(info2.scrollWidth).toBeLessThanOrEqual(430)
+})
+
+test('连续变更预览尺寸后，页面视口仍然是设备宽度', async () => {
+  // 布局切换时 ResizeObserver 会连发多次矩形。若 CDP 的 scale 与视图尺寸
+  // 来自不同快照，Chromium 会把布局视口撑到视图宽度，页面就按错误宽度排版。
+  await openUaEcho('iphone-14-pro-max')
+
+  const sizes = [
+    { x: 0, y: 60, width: 300, height: 650 },
+    { x: 0, y: 60, width: 420, height: 900 },
+    { x: 0, y: 60, width: 260, height: 560 },
+    { x: 0, y: 60, width: 380, height: 820 },
+  ]
+  // 不等待，故意让它们互相追尾
+  await Promise.all(sizes.map((s) => ipc(window, 'preview:set-bounds', s)))
+  await window.waitForTimeout(1500)
+
+  const info = await evalPreview<{ w: number; h: number; sw: number }>(
+    window,
+    '({ w: innerWidth, h: innerHeight, sw: document.documentElement.scrollWidth })'
+  )
+  expect(info.w, '布局视口必须仍是设备宽度').toBe(430)
+  expect(info.h).toBe(932)
+  expect(info.sw).toBeLessThanOrEqual(430)
+
+  // 关键一致性：视图尺寸必须等于 设备尺寸 × CDP 缩放。
+  // 差一点点页面就会被裁掉两侧，而 innerWidth 依然报 430，光看它查不出来。
+  const dbg = await ipc<{
+    fit: number
+    bounds: { width: number; height: number }
+    expected: { width: number; height: number }
+  }>(window, 'test:preview-debug')
+  expect(dbg.bounds.width, `视图宽应等于 430×${dbg.fit}`).toBe(dbg.expected.width)
+  expect(dbg.bounds.height, `视图高应等于 932×${dbg.fit}`).toBe(dbg.expected.height)
+})
+
+test('打开过程中并发变更尺寸，视图与缩放仍须一致', async () => {
+  // 工作台里进入项目时，DeviceFrame 一边挂载一边上报矩形，
+  // 恰好与 open() 的导航重叠。若 open 用旧缩放、bounds 用新矩形，
+  // 页面就会被裁掉两侧——用户看到的正是这个。
+  await ipc(window, 'preview:set-device', { deviceId: 'iphone-14-pro-max' })
+  const nav = ipc(window, 'preview:navigate', { url: `${TEST_SITE}/index.html` })
+  for (const w of [280, 360, 240, 400, 320]) {
+    void ipc(window, 'preview:set-bounds', { x: 0, y: 60, width: w, height: Math.round((w * 932) / 430) })
+    await window.waitForTimeout(60)
+  }
+  await nav
+  await window.waitForTimeout(2000)
+
+  const dbg = await ipc<{
+    fit: number
+    bounds: { width: number; height: number }
+    expected: { width: number; height: number }
+  }>(window, 'test:preview-debug')
+  expect(dbg.bounds.width, `视图宽应等于 430×${dbg.fit}`).toBe(dbg.expected.width)
+  expect(dbg.bounds.height, `视图高应等于 932×${dbg.fit}`).toBe(dbg.expected.height)
+
+  const info = await evalPreview<{ w: number; sw: number }>(
+    window,
+    '({ w: innerWidth, sw: document.documentElement.scrollWidth })'
+  )
+  expect(info.w).toBe(430)
+  expect(info.sw).toBeLessThanOrEqual(430)
 })
 
 test('探针能读出可交互元素与页面结构', async () => {

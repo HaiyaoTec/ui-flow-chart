@@ -16,6 +16,7 @@ import type {
 export const CH = {
   settingsGet: 'settings:get',
   settingsSet: 'settings:set',
+  themeSet: 'theme:set',
 
   aiProfilesList: 'ai:profiles:list',
   aiProfileSave: 'ai:profiles:save',
@@ -41,6 +42,7 @@ export const CH = {
   previewSetDevice: 'preview:set-device',
   previewNavigate: 'preview:navigate',
   previewProbe: 'preview:probe',
+  previewDiagnose: 'preview:diagnose',
 
   graphUpdateNode: 'graph:update-node',
   graphUpdateEdge: 'graph:update-edge',
@@ -77,10 +79,27 @@ export interface ExportResult {
   bytes: number
 }
 
+/** 设备模拟是否真的落到了页面上。数字直接摆出来，省得靠猜 */
+export interface PreviewDiagnosis {
+  deviceName: string
+  deviceSize: string
+  scale: number
+  viewSize: string
+  expectedViewSize: string
+  boundsMatch: boolean
+  pageInnerWidth: number
+  pageScrollWidth: number
+  uaApplied: boolean
+  uaSample: string
+  bodyClass: string
+  ok: boolean
+}
+
 /** invoke 通道的请求/响应类型映射 */
 export interface IpcInvokeMap {
   [CH.settingsGet]: { req: void; res: AppSettings }
   [CH.settingsSet]: { req: Partial<AppSettings>; res: AppSettings }
+  [CH.themeSet]: { req: { theme: AppSettings['theme'] }; res: AppSettings }
 
   [CH.aiProfilesList]: { req: void; res: AiProfileMasked[] }
   [CH.aiProfileSave]: {
@@ -112,6 +131,7 @@ export interface IpcInvokeMap {
   [CH.previewSetDevice]: { req: { deviceId: string; custom?: DeviceSpec }; res: void }
   [CH.previewNavigate]: { req: { url?: string; action?: 'back' | 'reload' }; res: void }
   [CH.previewProbe]: { req: void; res: unknown }
+  [CH.previewDiagnose]: { req: void; res: PreviewDiagnosis }
 
   [CH.graphUpdateNode]: { req: { id: string; patch: Record<string, unknown> }; res: void }
   [CH.graphUpdateEdge]: { req: { id: string; patch: Record<string, unknown> }; res: void }

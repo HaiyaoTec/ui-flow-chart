@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { ipcMain, shell, type BrowserWindow } from 'electron'
+import { ipcMain, nativeTheme, shell, type BrowserWindow } from 'electron'
 import { CH, type IpcInvokeMap, type InvokeChannel } from '@shared/ipc-contract'
 import { getDevice } from '@shared/devices'
 import type { FlowGraph } from '@shared/types'
@@ -59,6 +59,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   /* ------------------------------- 设置与凭证 ------------------------------- */
   handle(CH.settingsGet, () => getSettings())
   handle(CH.settingsSet, (patch) => setSettings(patch))
+  handle(CH.themeSet, ({ theme }) => {
+    // nativeTheme 是主题的唯一事实源：设了它，渲染进程里的
+    // prefers-color-scheme 会跟着变，系统原生弹窗也一致
+    nativeTheme.themeSource = theme
+    return setSettings({ theme })
+  })
 
   handle(CH.aiProfilesList, () => listProfiles())
   handle(CH.aiProfileSave, ({ profile, apiKey }) => saveProfile(profile, apiKey))
@@ -101,6 +107,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   handle(CH.previewSetDevice, ({ deviceId, custom }) => preview.setDevice(getDevice(deviceId, custom)))
   handle(CH.previewNavigate, (input) => preview.navigate(input))
   handle(CH.previewProbe, () => preview.driver.probe())
+  handle(CH.previewDiagnose, () => preview.diagnose())
 
   /* --------------------------------- 图谱 --------------------------------- */
   handle(CH.graphUpdateNode, ({ id, patch }) => {
@@ -157,4 +164,5 @@ function registerTestHooks(): void {
   ipcMain.handle('test:probe', async () => preview.driver.probe())
   ipcMain.handle('test:wait-stable', async () => preview.driver.waitStable())
   ipcMain.handle('test:graph', async (_e, projectId: string) => loadGraph(projectId))
+  ipcMain.handle('test:preview-debug', async () => preview.debugInfo())
 }

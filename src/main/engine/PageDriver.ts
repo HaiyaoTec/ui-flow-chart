@@ -52,6 +52,7 @@ export class PageDriver implements IPageDriver {
   private bounds: Bounds = { x: 0, y: 0, width: 430, height: 932 }
   private visible = true
   private onNav?: (url: string, loading: boolean) => void
+  private onNavigated?: () => void
   private onCrash?: () => void
 
   get attached(): boolean {
@@ -92,6 +93,9 @@ export class PageDriver implements IPageDriver {
     })
     wc.on('did-start-loading', () => this.onNav?.(wc.getURL(), true))
     wc.on('did-stop-loading', () => this.onNav?.(wc.getURL(), false))
+    // 跨进程导航会换掉 RenderFrameHost，Emulation 覆盖有可能不跟过去。
+    // 每次主框架提交后重放一遍，成本很低但能免掉「设备模拟突然失效」。
+    wc.on('did-navigate', () => this.onNavigated?.())
     wc.on('render-process-gone', () => this.onCrash?.())
 
     // 铁律：先 attach 并铺好全部 override，再导航目标站。
@@ -112,7 +116,11 @@ export class PageDriver implements IPageDriver {
     if (!this.view) throw new Error('预览视图尚未创建')
     const wc = this.view.webContents
     if (wc.getURL()) return
-    await wc.loadURL('about:blank')
+    try {
+      await wc.loadURL('about:blank')
+    } catch {
+      // 这一步只为把渲染进程拉起来，被后续导航打断（ERR_ABORTED）属于正常现象
+    }
   }
 
   destroy(): void {
@@ -136,8 +144,13 @@ export class PageDriver implements IPageDriver {
     this.view = null
   }
 
-  setCallbacks(cb: { onNav?: (url: string, loading: boolean) => void; onCrash?: () => void }): void {
+  setCallbacks(cb: {
+    onNav?: (url: string, loading: boolean) => void
+    onNavigated?: () => void
+    onCrash?: () => void
+  }): void {
     this.onNav = cb.onNav
+    this.onNavigated = cb.onNavigated
     this.onCrash = cb.onCrash
   }
 
@@ -201,6 +214,15 @@ export class PageDriver implements IPageDriver {
   setBounds(b: Bounds): void {
     this.bounds = b
     this.view?.setBounds(b)
+  }
+
+  /** 当前实际下发给 CDP 的缩放，用于校验与视图尺寸是否一致 */
+  currentScale(): number {
+    return this.inputScale
+  }
+
+  currentBounds(): Bounds | null {
+    return this.view ? this.bounds : null
   }
 
   setVisible(visible: boolean): void {
