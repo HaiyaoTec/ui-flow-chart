@@ -12,3 +12,5 @@ playwright-report/
 .debug/
 test-site/requests.log
 
+dev-out.txt
+
