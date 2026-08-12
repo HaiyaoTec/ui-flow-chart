@@ -116,6 +116,10 @@
   background-size: 22px 22px;
   overflow: hidden;
 }
+/* 机身已经放不下时，这点留白只会再挤掉几十像素的可视内容 */
+.preview-stage.cropped {
+  padding: 0;
+}
 
 /* 量可用空间用的容器，尺寸计算全在 JS 里做。
    必须显式纵向撑满：父级是 align-items:center 的 flex，
@@ -279,6 +283,7 @@
 .preview-meta {
   padding: 6px 12px;
   border-top: 1px solid var(--line);
+  z-index: 1;
   background: var(--panel);
   font-size: 11.5px;
   color: var(--muted);
@@ -286,6 +291,12 @@
   display: flex;
   gap: 14px;
   align-items: center;
+}
+
+/* 内容是被截断的，给个投影暗示「下面还有」，硬邦邦的直边看着像坏了。
+   只能画在原生视图之外——它永远盖在 HTML 之上，渐变蒙层根本看不见 */
+.preview-meta.cropped {
+  box-shadow: 0 -7px 14px -8px rgba(0, 0, 0, 0.5);
 }
 
 button.link-btn {

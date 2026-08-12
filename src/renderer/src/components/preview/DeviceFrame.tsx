@@ -4,8 +4,10 @@ import StatusBar from './StatusBar'
 
 interface Props {
   device: DeviceSpec
-  /** 'fit' 为按可用空间自适应，数字为指定缩放倍数（塞不下时自动回落到自适应） */
+  /** 'fit' 为按可用空间自适应，数字为按真实比例呈现（塞不下就裁切） */
   zoom?: 'fit' | number
+  /** 机身是否被裁切，用于上层调整周边留白与边缘处理 */
+  onOverflowChange?: (overflow: boolean) => void
   /** 屏幕占位区的可见矩形变化时回调，主进程据此摆放 WebContentsView */
   onScreenRect: (rect: { x: number; y: number; width: number; height: number; scale: number }) => void
 }
@@ -24,6 +26,17 @@ const STATUS_RATIO = 0.115
 const CHROME_RATIO = {
   mobile: { x: 0.076, y: 0.213 },
   tablet: { x: 0.076, y: 0.076 },
+  desktop: { x: 0, y: 0 },
+}
+/**
+ * 只算真正占布局的部分（不含外圈光晕——它是 box-shadow，不参与布局）。
+ * 自适应取尺寸时用上面那份带光晕的比例，留出余量；
+ * 判断「放不放得下」必须用这份，否则会把明明放得下的机身判成溢出，
+ * 于是从居中变成靠左，看着像贴边了。
+ */
+const LAYOUT_RATIO = {
+  mobile: { x: 0.044, y: 0.181 },
+  tablet: { x: 0.044, y: 0.044 },
   desktop: { x: 0, y: 0 },
 }
 /** 桌面档的浏览器标题栏是固定高度 */
@@ -57,7 +70,7 @@ function frameMetrics(kind: 'mobile' | 'tablet' | 'desktop', w: number) {
  * 屏幕尺寸用 JS 按可用空间与设备宽高比算出来，不靠 CSS aspect-ratio：
  * 嵌套 flex 里 aspect-ratio 的解析结果不稳定，实测会被拉成容器宽度。
  */
-export default function DeviceFrame({ device, zoom = 'fit', onScreenRect }: Props) {
+export default function DeviceFrame({ device, zoom = 'fit', onScreenRect, onOverflowChange }: Props) {
   const boxRef = useRef<HTMLDivElement>(null)
   const screenRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ width: 0, height: 0 })
@@ -99,11 +112,14 @@ export default function DeviceFrame({ device, zoom = 'fit', onScreenRect }: Prop
       h = device.height * zoom
     }
     setSize({ width: Math.round(w), height: Math.round(h) })
+    const layout = LAYOUT_RATIO[device.kind]
     setOverflow({
-      x: w * (1 + chrome.x) > box.clientWidth + 1,
-      y: h + chrome.y * w + barH > box.clientHeight + 1,
+      x: w * (1 + layout.x) > box.clientWidth + 1,
+      y: h + layout.y * w + barH > box.clientHeight + 1,
     })
   }, [device.kind, device.width, device.height, zoom])
+
+  useEffect(() => onOverflowChange?.(overflow.x || overflow.y), [overflow.x, overflow.y, onOverflowChange])
 
   useLayoutEffect(() => {
     measure()

@@ -39,6 +39,8 @@ export default function PreviewPane({ initialUrl = '', deviceId: boundDeviceId, 
   })
   /** 屏幕占位区的实际显示宽度，用来算缩放比例 */
   const [shownWidth, setShownWidth] = useState(0)
+  /** 机身是否被裁切 */
+  const [cropped, setCropped] = useState(false)
   const device = getDevice(deviceId)
   const lastRect = useRef('')
   const alive = useRef(true)
@@ -227,11 +229,12 @@ export default function PreviewPane({ initialUrl = '', deviceId: boundDeviceId, 
         </button>
       </div>
 
-      <div className="preview-stage">
-        <DeviceFrame device={device} zoom={zoom} onScreenRect={onScreenRect} />
+      {/* 裁切时收掉舞台留白，把每一像素都让给设备 */}
+      <div className={`preview-stage${cropped ? ' cropped' : ''}`}>
+        <DeviceFrame device={device} zoom={zoom} onScreenRect={onScreenRect} onOverflowChange={setCropped} />
       </div>
 
-      <div className="preview-meta">
+      <div className={`preview-meta${cropped ? ' cropped' : ''}`}>
         <span>
           {device.width}×{device.height} @{device.deviceScaleFactor}x · {device.hasTouch ? '触摸' : '鼠标'}
         </span>
