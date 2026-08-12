@@ -20,6 +20,7 @@ import {
   partitionOf,
 } from '../store/projects'
 import { getSettings, setSettings } from '../store/settings'
+import { themeBackground } from '../window'
 
 type Handler<C extends InvokeChannel> = (
   payload: IpcInvokeMap[C]['req']
@@ -70,7 +71,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     // nativeTheme 是主题的唯一事实源：设了它，渲染进程里的
     // prefers-color-scheme 会跟着变，系统原生弹窗也一致
     nativeTheme.themeSource = theme
-    return setSettings({ theme })
+    const next = setSettings({ theme })
+    // 窗口底色也要跟着换，否则缩放窗口时边缘会闪出另一套主题的颜色
+    getWindow()?.setBackgroundColor(themeBackground())
+    return next
   })
 
   handle(CH.aiProfilesList, () => listProfiles())
