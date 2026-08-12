@@ -5,6 +5,48 @@
   min-height: 0;
 }
 
+/* 区块标题条：与「探索日志」同款——整条即开关，右侧留出当前缩放与自检 */
+.pv-head {
+  display: flex;
+  align-items: center;
+  flex: none;
+  padding-right: 8px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+.pv-head-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  font-size: 12px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  color: var(--muted);
+}
+.pv-head-toggle:hover:not(:disabled) {
+  background: var(--panel-2);
+}
+.pv-head-title {
+  color: var(--fg);
+}
+.pv-head-toggle .muted {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 收起时整块模拟器让位，原生视图也会同步隐藏 */
+.preview-pane.collapsed > .preview-toolbar,
+.preview-pane.collapsed > .preview-stage,
+.preview-pane.collapsed > .preview-meta,
+.preview-pane.collapsed > .preview-diag {
+  display: none;
+}
+
 /* 单行不换行：换行会吃掉上百像素的纵向空间，而设备高度正靠这些像素 */
 .preview-toolbar {
   display: flex;
@@ -18,15 +60,20 @@
   overflow: hidden;
 }
 /* 表单控件默认比按钮高一档，压回同一高度，整条栏才对得上画布那条 */
-.preview-toolbar select,
+.preview-toolbar .ufc-select,
 .preview-toolbar input.url {
-  padding: 6px 9px;
+  padding: 5px 7px 5px 10px;
 }
-.preview-toolbar select {
+.preview-toolbar .ufc-select {
   flex: 0 1 auto;
   width: auto;
-  min-width: 0;
+  /* 别被地址栏挤成「iPh…」，机型名至少要能认出来 */
+  min-width: 124px;
   max-width: 230px;
+}
+/* 工具栏窄，设备的分辨率后缀交给弹层去显示 */
+.preview-toolbar .ufc-select > .hint {
+  display: none;
 }
 .preview-toolbar input.url {
   flex: 1 1 auto;
@@ -45,7 +92,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 14px;
+  padding: 8px;
   background-image: radial-gradient(var(--grid) 1px, transparent 1px);
   background-size: 22px 22px;
   overflow: hidden;
@@ -95,11 +142,42 @@
   background: #000;
   overflow: hidden;
 }
+/* 手机的上圆角由状态栏那一条负责，屏幕只圆下面两角 */
+.device-frame.mobile .screen {
+  border-radius: 0 0 var(--screen-radius, 34px) var(--screen-radius, 34px);
+}
 .device-frame.tablet .screen {
   border-radius: 14px;
 }
 .device-frame.desktop .screen {
   border-radius: 0 0 12px 12px;
+}
+
+/* 状态栏：屏幕上方的独立条，与屏幕同宽、顶部两角随机身圆角 */
+.status-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #000;
+  color: #fff;
+  overflow: hidden;
+}
+.status-bar .sb-time {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* 灵动岛：真机上它就压在状态栏这一条里 */
+.status-bar .sb-island {
+  flex: none;
+  background: #0a0b0e;
+  border-radius: 999px;
+}
+.status-bar .sb-icons {
+  display: inline-flex;
+  align-items: center;
 }
 
 .device-frame .notch {
@@ -192,7 +270,7 @@ button.link-btn {
 }
 button.link-btn:hover {
   color: var(--fg);
-  border-color: var(--line);
+  background: var(--panel-2);
 }
 
 /* 模拟自检结果：把数字摆出来，不用靠肉眼猜哪里不对 */

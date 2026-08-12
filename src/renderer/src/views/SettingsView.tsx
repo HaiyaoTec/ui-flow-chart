@@ -3,6 +3,7 @@ import { CH } from '@shared/ipc-contract'
 import type { AiProfileMasked, AiProtocol, AiTestResult, AppSettings } from '@shared/types'
 import Icon from '../components/Icon'
 import Modal from '../components/Modal'
+import Select from '../components/Select'
 import { invoke } from '../ipc'
 
 const PROTOCOL_PRESETS: Record<AiProtocol, { label: string; baseUrl: string; model: string; hint: string }> = {
@@ -191,19 +192,14 @@ export default function SettingsView() {
           </label>
           <label className="field grow">
             <span>协议</span>
-            <select
+            <Select
               value={form.protocol}
-              onChange={(e) => {
-                const p = e.target.value as AiProtocol
+              options={Object.entries(PROTOCOL_PRESETS).map(([k, v]) => ({ value: k, label: v.label }))}
+              onChange={(v) => {
+                const p = v as AiProtocol
                 setForm({ ...form, protocol: p, baseUrl: PROTOCOL_PRESETS[p].baseUrl, model: PROTOCOL_PRESETS[p].model })
               }}
-            >
-              {Object.entries(PROTOCOL_PRESETS).map(([k, v]) => (
-                <option key={k} value={k}>
-                  {v.label}
-                </option>
-              ))}
-            </select>
+            />
           </label>
         </div>
 

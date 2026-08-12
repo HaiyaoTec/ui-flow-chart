@@ -8,8 +8,10 @@ import type {
   SessionSnapshot,
   SessionState,
 } from '@shared/types'
+import { useDialog } from '../components/Dialog'
 import Icon from '../components/Icon'
 import Modal from '../components/Modal'
+import Select from '../components/Select'
 import SiteIcon from '../components/SiteIcon'
 import { invoke } from '../ipc'
 import { useApp } from '../state/store'
@@ -71,6 +73,7 @@ export default function ProjectsView({ onOpened }: Props) {
 
   const openProject = useApp((s) => s.openProject)
   const session = useApp((s) => s.session)
+  const dialog = useDialog()
 
   const reload = async () => setProjects(await invoke(CH.projectList))
 
@@ -127,11 +130,17 @@ export default function ProjectsView({ onOpened }: Props) {
 
   async function remove(id: string) {
     if (session?.projectId === id && session.state !== 'idle' && session.state !== 'finished') {
-      alert('该项目正在探索中，请先结束后再删除。')
+      await dialog.alert({ title: '无法删除', message: '该项目正在探索中，请先结束后再删除。' })
       return
     }
     const p = projects.find((x) => x.id === id)
-    if (!confirm(`删除项目「${p?.name ?? id}」？\n工程目录（含全部截图与图谱）会一并删除，且不可恢复。`)) return
+    const ok = await dialog.confirm({
+      title: `删除项目「${p?.name ?? id}」？`,
+      message: '工程目录（含全部截图与图谱）会一并删除，且不可恢复。',
+      confirmText: '删除',
+      danger: true,
+    })
+    if (!ok) return
     await invoke(CH.projectDelete, { id })
     await reload()
   }
@@ -290,24 +299,24 @@ export default function ProjectsView({ onOpened }: Props) {
         <div className="row" style={{ alignItems: 'flex-start' }}>
           <label className="field grow">
             <span>模拟设备</span>
-            <select value={form.deviceId} onChange={(e) => setForm({ ...form, deviceId: e.target.value })}>
-              {DEVICE_PRESETS.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name} · {d.width}×{d.height}@{d.deviceScaleFactor}x
-                </option>
-              ))}
-            </select>
+            <Select
+              value={form.deviceId}
+              onChange={(v) => setForm({ ...form, deviceId: v })}
+              options={DEVICE_PRESETS.map((d) => ({
+                value: d.id,
+                label: d.name,
+                hint: `${d.width}×${d.height}@${d.deviceScaleFactor}x`,
+              }))}
+            />
           </label>
           <label className="field grow">
             <span>AI 配置</span>
-            <select value={form.aiProfileId} onChange={(e) => setForm({ ...form, aiProfileId: e.target.value })}>
-              {profiles.length === 0 && <option value="">（尚未配置）</option>}
-              {profiles.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} · {p.model}
-                </option>
-              ))}
-            </select>
+            <Select
+              value={form.aiProfileId}
+              onChange={(v) => setForm({ ...form, aiProfileId: v })}
+              placeholder="（尚未配置）"
+              options={profiles.map((p) => ({ value: p.id, label: p.name, hint: p.model }))}
+            />
           </label>
         </div>
 

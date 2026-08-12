@@ -3,39 +3,90 @@ import { DEVICE_PRESETS, getDevice } from '@shared/devices'
 import { CH, type NavState, type PreviewDiagnosis } from '@shared/ipc-contract'
 import { invoke, on } from '../../ipc'
 import Icon from '../Icon'
+import Select from '../Select'
 import DeviceFrame from './DeviceFrame'
 import './preview.css'
 
 interface Props {
   initialUrl?: string
+  /** 项目指定的设备。工作台里预览归项目所有，下拉框要显示项目真正在用的那台 */
+  deviceId?: string
   onDeviceChange?: (deviceId: string) => void
 }
 
-export default function PreviewPane({ initialUrl = '', onDeviceChange }: Props) {
-  const [deviceId, setDeviceId] = useState(DEVICE_PRESETS[0].id)
+export default function PreviewPane({ initialUrl = '', deviceId: boundDeviceId, onDeviceChange }: Props) {
+  const [deviceId, setDeviceId] = useState(boundDeviceId ?? DEVICE_PRESETS[0].id)
   const [url, setUrl] = useState(initialUrl)
+  const [editingUrl, setEditingUrl] = useState(false)
   const [nav, setNav] = useState<NavState | null>(null)
   const [busy, setBusy] = useState(false)
   const [diag, setDiag] = useState<PreviewDiagnosis | null>(null)
+  const [open, setOpen] = useState(() => localStorage.getItem('ufc.previewOpen') !== '0')
+  /** 屏幕占位区的实际显示宽度，用来算缩放比例 */
+  const [shownWidth, setShownWidth] = useState(0)
   const device = getDevice(deviceId)
   const lastRect = useRef('')
+  const alive = useRef(true)
 
   useEffect(() => on(CH.evPreviewNav, setNav), [])
 
-  // 组件卸载时隐藏原生视图，避免它盖在别的页面上
+  /**
+   * 地址栏跟随真实导航状态，与浏览器一致。
+   *
+   * 之前它只在挂载时取一次 initialUrl，切换项目时组件不会重新挂载，
+   * 于是原生视图已经打开了新项目的网址，输入框还停在上一个项目的地址上。
+   * 改为镜像 nav.url 后，切换项目、页面内跳转、后退都能自动跟上；
+   * 用户正在输入时不覆盖，免得把人打断。
+   */
   useEffect(() => {
+    if (!editingUrl && nav?.url && nav.url !== 'about:blank') setUrl(nav.url)
+  }, [nav?.url, editingUrl])
+
+  // 项目换了设备，下拉框要跟着换。主进程在 project:open 时已经按项目设备打开了
+  // 预览，这里只做显示同步，不再重复下发，否则会白白重载一次页面
+  useEffect(() => {
+    if (boundDeviceId) setDeviceId(boundDeviceId)
+  }, [boundDeviceId])
+
+  // 组件卸载时隐藏原生视图，避免它盖在别的页面上。
+  // alive 必须在这里置回 true：StrictMode 下 effect 会「挂载→清理→再挂载」，
+  // 只在清理里置 false 的话，第二次挂载后守卫永远是关的，视图再也藏不掉
+  useEffect(() => {
+    alive.current = true
     void invoke(CH.previewSetVisible, { visible: true })
     return () => {
+      alive.current = false
       void invoke(CH.previewSetVisible, { visible: false })
     }
   }, [])
 
+  /**
+   * 卸载后不许再改原生视图的可见性。
+   *
+   * 设备下拉展开时会临时把视图藏起来（自绘弹层挡不住原生视图），
+   * 关闭时再显示回来。但离开工作台是「父组件先清理、子组件后清理」，
+   * 子组件那次"关闭弹层"的回调会在本组件收尾之后才到，
+   * 把已经藏好的视图又亮出来——表现就是项目列表上多出一块白色色块。
+   */
+  const showView = (visible: boolean) => {
+    if (!alive.current) return
+    void invoke(CH.previewSetVisible, { visible })
+  }
+
   const onScreenRect = useCallback((rect: { x: number; y: number; width: number; height: number }) => {
+    setShownWidth(rect.width)
     const key = `${rect.x},${rect.y},${rect.width},${rect.height}`
     if (key === lastRect.current) return
     lastRect.current = key
     void invoke(CH.previewSetBounds, rect)
   }, [])
+
+  /** 收起后原生视图必须一起藏起来，否则它会浮在下面的日志上 */
+  function toggleOpen(next: boolean) {
+    setOpen(next)
+    localStorage.setItem('ufc.previewOpen', next ? '1' : '0')
+    showView(next)
+  }
 
   async function go() {
     if (!url.trim()) return
@@ -70,6 +121,9 @@ export default function PreviewPane({ initialUrl = '', onDeviceChange }: Props) 
     }
   }
 
+  // 缩放＝屏幕实际显示宽度 ÷ 设备逻辑宽度，与主进程下发给 CDP 的 scale 同源
+  const zoomText = shownWidth > 0 ? `缩放 ${Math.round((shownWidth / device.width) * 100)}%` : ''
+
   async function changeDevice(id: string) {
     setDeviceId(id)
     onDeviceChange?.(id)
@@ -82,19 +136,40 @@ export default function PreviewPane({ initialUrl = '', onDeviceChange }: Props) 
   }
 
   return (
-    <div className="preview-pane">
+    <div className={`preview-pane${open ? '' : ' collapsed'}`}>
+      {/* 与「探索日志」同一套：标题条即开关，右侧显示当前缩放比例 */}
+      <div className="pv-head">
+        <button className="pv-head-toggle" onClick={() => toggleOpen(!open)} title={open ? '收起模拟设备' : '展开模拟设备'}>
+          <Icon name={open ? 'caretDown' : 'caretUp'} size={14} />
+          <span className="pv-head-title">模拟设备</span>
+          <span className="muted">{zoomText}</span>
+        </button>
+        <button className="link-btn" onClick={() => void diagnose()} disabled={busy || !open}>
+          <Icon name="diagnose" size={13} />
+          自检
+        </button>
+      </div>
+
       <div className="preview-toolbar">
-        <select value={deviceId} onChange={(e) => void changeDevice(e.target.value)} disabled={busy}>
-          {DEVICE_PRESETS.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.name} · {d.width}×{d.height}@{d.deviceScaleFactor}x
-            </option>
-          ))}
-        </select>
+        <Select
+          className="device-select"
+          value={deviceId}
+          disabled={busy}
+          onChange={(id) => void changeDevice(id)}
+          options={DEVICE_PRESETS.map((d) => ({
+            value: d.id,
+            label: d.name,
+            hint: `${d.width}×${d.height}@${d.deviceScaleFactor}x`,
+          }))}
+          // 自绘弹层是 HTML，原生视图永远画在它上面，展开期间先把视图藏起来
+          onOpenChange={(open) => showView(!open)}
+        />
         <input
           className="url"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
+          onFocus={() => setEditingUrl(true)}
+          onBlur={() => setEditingUrl(false)}
           onKeyDown={(e) => e.key === 'Enter' && void go()}
           placeholder="http://localhost:4173"
         />
@@ -125,10 +200,6 @@ export default function PreviewPane({ initialUrl = '', onDeviceChange }: Props) 
         <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {nav?.url || '(未导航)'}
         </span>
-        <button className="link-btn" onClick={() => void diagnose()} disabled={busy}>
-          <Icon name="diagnose" size={13} />
-          自检
-        </button>
       </div>
 
       {diag && (

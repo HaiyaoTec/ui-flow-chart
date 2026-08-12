@@ -97,7 +97,47 @@
 }
 /* 预览占比很大时说明用户要的是操作空间，日志收到一行高，把纵向让给设备 */
 .ws-side.log-collapsed {
-  grid-template-rows: 1fr 72px;
+  grid-template-rows: 1fr 128px;
+}
+/* 手动收起后只留标题条 */
+.ws-side.log-hidden {
+  grid-template-rows: 1fr auto;
+}
+/* 模拟设备收起时，纵向全部让给日志 */
+.ws-side:has(.preview-pane.collapsed) {
+  grid-template-rows: auto 1fr;
+}
+
+.ws-log-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+}
+.ws-log-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  flex: none;
+  padding: 7px 10px;
+  font-size: 12px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  color: var(--muted);
+}
+.ws-log-head:hover:not(:disabled) {
+  background: var(--panel-2);
+}
+.ws-log-head span:nth-of-type(1) {
+  color: var(--fg);
+}
+.ws-log-head .muted {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
 }
 
 .layout-switch {
@@ -123,6 +163,8 @@
 }
 
 .ws-log {
+  flex: 1;
+  min-height: 0;
   border-top: 1px solid var(--line);
   background: var(--bg);
   overflow: auto;

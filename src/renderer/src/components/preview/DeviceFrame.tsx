@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { DeviceSpec } from '@shared/types'
+import StatusBar from './StatusBar'
 
 interface Props {
   device: DeviceSpec
@@ -7,27 +8,30 @@ interface Props {
   onScreenRect: (rect: { x: number; y: number; width: number; height: number }) => void
 }
 
+/** 状态栏高度占屏幕显示宽度的比例，取自真机（430 宽对约 50 高） */
+const STATUS_RATIO = 0.115
+
 /** 外框装饰占掉的空间：左右内边距、上下内边距 + 底部 home 条 */
 const CHROME = {
-  mobile: { x: 24, y: 38 },
-  tablet: { x: 32, y: 32 },
+  mobile: { x: 18, y: 34 },
+  tablet: { x: 24, y: 28 },
   desktop: { x: 0, y: 30 },
 }
 
 /**
  * 按屏幕实际显示宽度算出外框各项尺寸。
  * 全部用比例而非固定像素——预览缩小时固定圆角会把手机啃成圆角矩形。
- * 比例取自真机观感：屏幕圆角约为宽度的 13%，机身边框约 3%。
+ * 比例参考真机后再收一档：圆角与边框都让位给网页显示面积。
  */
 function frameMetrics(kind: 'mobile' | 'tablet' | 'desktop', w: number) {
-  const radiusRatio = kind === 'mobile' ? 0.13 : kind === 'tablet' ? 0.035 : 0
-  const bezel = kind === 'desktop' ? 0 : Math.max(3, Math.round(w * 0.03))
+  const radiusRatio = kind === 'mobile' ? 0.095 : kind === 'tablet' ? 0.028 : 0
+  const bezel = kind === 'desktop' ? 0 : Math.max(3, Math.round(w * 0.022))
   const screenRadius = Math.round(w * radiusRatio)
   return {
     bezel,
     screenRadius,
     frameRadius: screenRadius + bezel,
-    ring: Math.max(2, Math.round(w * 0.022)),
+    ring: Math.max(2, Math.round(w * 0.016)),
     notchW: Math.round(w * 0.29),
     notchH: Math.max(4, Math.round(w * 0.065)),
     homeW: Math.round(w * 0.35),
@@ -58,9 +62,12 @@ export default function DeviceFrame({ device, onScreenRect }: Props) {
     const chrome = CHROME[device.kind]
     const availW = Math.max(60, box.clientWidth - chrome.x)
     const availH = Math.max(60, box.clientHeight - chrome.y)
-    // 以设备宽高比为准，取能塞进可用区域的最大尺寸
+    // 以设备宽高比为准，取能塞进可用区域的最大尺寸。
+    // 手机还要为状态栏留一条：它按屏幕宽度等比，所以先解出高度再回推宽度，
+    // 否则「先算宽、再减状态栏」会把机身撑出可用区
     const ratio = device.width / device.height
-    let h = availH
+    const statusRatio = device.kind === 'mobile' ? STATUS_RATIO : 0
+    let h = availH / (1 + statusRatio * ratio)
     let w = h * ratio
     if (w > availW) {
       w = availW
@@ -144,11 +151,20 @@ export default function DeviceFrame({ device, onScreenRect }: Props) {
       >
         {isPhone && (
           <>
-            <div className="notch" />
             <div className="side-btn power" />
             <div className="side-btn vol-up" />
             <div className="side-btn vol-down" />
           </>
+        )}
+        {/* 状态栏连同灵动岛一起画在屏幕上方的独立条里——盖在屏幕上的话会被原生视图挡住 */}
+        {isPhone && size.width > 0 && (
+          <StatusBar
+            width={size.width}
+            height={Math.round(size.width * STATUS_RATIO)}
+            radius={metrics.screenRadius}
+            islandW={metrics.notchW}
+            islandH={metrics.notchH}
+          />
         )}
         {device.kind === 'desktop' && (
           <div className="browser-bar" style={{ width: size.width }}>

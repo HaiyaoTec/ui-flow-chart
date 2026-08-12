@@ -3,6 +3,7 @@ import {
   CheckCheck,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   CircleAlert,
   FileText,
   FolderOpen,
@@ -66,6 +67,7 @@ const ICONS = {
   themeSystem: Monitor,
   caretDown: ChevronDown,
   caretRight: ChevronRight,
+  caretUp: ChevronUp,
   add: Plus,
   edit: Pencil,
 } satisfies Record<string, LucideIcon>

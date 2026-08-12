@@ -60,7 +60,15 @@
 }
 .modal-close:hover {
   color: var(--fg);
-  border-color: var(--line);
+  background: var(--panel-2);
+}
+
+/* 确认框正文：保留换行，行距放宽一点 */
+.dialog-msg {
+  font-size: 13px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  color: var(--fg);
 }
 
 .modal-body {

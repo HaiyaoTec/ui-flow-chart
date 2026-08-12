@@ -95,8 +95,17 @@ button {
   cursor: pointer;
   transition: border-color 0.15s;
 }
+/* 悬停反馈全局统一：只变颜色，不动边框。
+   边框一变色，元素的轮廓就跟着"跳"一下，成排的按钮尤其明显；
+   以侧边栏菜单为基准——底色加深即可。 */
 button:hover:not(:disabled) {
-  border-color: var(--accent);
+  background: color-mix(in srgb, var(--fg) 7%, var(--panel-2));
+}
+button.primary:hover:not(:disabled) {
+  background: color-mix(in srgb, #000 10%, var(--accent));
+}
+button.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
 }
 button:disabled {
   opacity: 0.45;
@@ -114,6 +123,16 @@ button.primary {
 button.danger {
   color: var(--danger);
   border-color: var(--danger);
+}
+/* 危险操作的主按钮：确认删除这类不可撤销动作用它 */
+button.danger-solid {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+  font-weight: 600;
+}
+button.danger-solid:hover:not(:disabled) {
+  background: color-mix(in srgb, #000 12%, var(--danger));
 }
 
 input,
@@ -142,7 +161,7 @@ select {
   transition: border-color 0.15s;
 }
 select:hover {
-  border-color: var(--accent);
+  background-color: var(--panel-2);
 }
 select option {
   background: var(--panel);
@@ -487,7 +506,7 @@ label.field > .hint {
   right: 12px;
 }
 .project-card:hover {
-  border-color: var(--accent);
+  background: color-mix(in srgb, var(--fg) 5%, var(--panel));
 }
 .project-card:active {
   transform: translateY(1px);
@@ -513,9 +532,34 @@ label.field > .hint {
   margin-bottom: 3px;
 }
 
-/* 列表布局要的是密度：标题、地址、指标压到一行，行高收紧 */
+/* 列表布局要的是密度：标题、地址、指标压到一行，行高收紧。
+   整段列表本身是一块功能区域，底色与卡片一致；行不再各自成卡，
+   靠分隔线区分——否则七八条独立白条浮在页面底色上，很散 */
+.project-list.list {
+  gap: 0;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
 .project-list.list .project-card {
-  padding: 9px 14px;
+  padding: 10px 14px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+.project-list.list .project-card + .project-card {
+  border-top: 1px solid var(--line);
+}
+.project-list.list .project-card:hover {
+  background: var(--panel-2);
+}
+.project-list.list .project-card.need-human {
+  background: color-mix(in srgb, var(--branch) 10%, transparent);
+}
+/* 容器 overflow:hidden 会切掉外描边，焦点框改画在内侧 */
+.project-list.list .project-card:focus-visible {
+  outline-offset: -2px;
 }
 .project-list.list .pc-main {
   display: flex;

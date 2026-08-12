@@ -16,9 +16,9 @@
     border-color 0.15s;
 }
 .proj-trigger:hover {
-  background: var(--panel);
-  border-color: var(--accent);
+  background: color-mix(in srgb, var(--fg) 7%, var(--panel-2));
 }
+/* 展开态例外：这里的高亮边框表示"菜单正开着"，不是悬停反馈 */
 .proj-trigger.open {
   background: var(--panel);
   border-color: var(--accent);

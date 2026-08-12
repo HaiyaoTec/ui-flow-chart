@@ -156,6 +156,7 @@ export class PreviewManager {
     pane: Bounds
     fit: number
     bounds: Bounds | null
+    visible: boolean
     expected: { width: number; height: number }
   } {
     return {
@@ -163,6 +164,7 @@ export class PreviewManager {
       pane: this.pane,
       fit: this.driver.currentScale(),
       bounds: this.driver.currentBounds(),
+      visible: this.driver.isVisible(),
       expected: {
         width: Math.round(this.device.width * this.driver.currentScale()),
         height: Math.round(this.device.height * this.driver.currentScale()),

@@ -598,5 +598,9 @@ export function delay(ms: number): Promise<void> {
 /** 预览框内的适配比例：让设备整屏塞进可用区域，最大不放大 */
 export function computeFitScale(device: DeviceSpec, pane: { width: number; height: number }): number {
   if (pane.width <= 0 || pane.height <= 0) return 1
-  return Math.min(pane.width / device.width, pane.height / device.height, 1)
+  // 上限取设备像素密度而不是 1：手机逻辑宽度只有 430，面板比它宽时若封顶在 1，
+  // 网页就只占中间一小条、两侧留黑。放大到 dpr 倍仍是在对 dpr 倍的光栅做降采样，
+  // 画面不会糊；超过 dpr 才会真的被拉伸，所以到此为止。
+  const max = Math.max(1, device.deviceScaleFactor)
+  return Math.min(pane.width / device.width, pane.height / device.height, max)
 }

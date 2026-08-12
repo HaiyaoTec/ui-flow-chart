@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { getDevice } from '@shared/devices'
 import { CH } from '@shared/ipc-contract'
 import FlowCanvas from '../components/canvas/FlowCanvas'
+import { useDialog } from '../components/Dialog'
 import Icon from '../components/Icon'
 import PreviewPane from '../components/preview/PreviewPane'
 import ProjectSwitcher from '../components/ProjectSwitcher'
@@ -28,8 +29,11 @@ interface Props {
 
 export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
   const { project, graph, session, logs, newNodeIds, setSession } = useApp()
+  const dialog = useDialog()
   const [exporting, setExporting] = useState('')
   const [previewWidth, setPreviewWidth] = useState(DEFAULT_PREVIEW)
+  // 收起状态记在本地，下次进来还是上次的选择
+  const [logOpen, setLogOpen] = useState(() => localStorage.getItem('ufc.logOpen') !== '0')
   const [dragging, setDragging] = useState(false)
   // 用户自己调过分栏后就不再自动改，避免跟人抢方向盘
   const widthPinned = useRef(false)
@@ -38,7 +42,9 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
 
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight })
-  }, [logs.length])
+  }, [logs.length, logOpen])
+
+  useEffect(() => localStorage.setItem('ufc.logOpen', logOpen ? '1' : '0'), [logOpen])
 
   const state = session?.state ?? 'idle'
 
@@ -101,7 +107,7 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
           : await invoke(CH.exportPng, { projectId: project!.id })
       await invoke(CH.shellReveal, { path: r.path })
     } catch (e) {
-      alert(`导出失败：${e instanceof Error ? e.message : String(e)}`)
+      await dialog.alert({ title: '导出失败', message: e instanceof Error ? e.message : String(e) })
     } finally {
       setExporting('')
     }
@@ -204,15 +210,25 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
           title="拖动调整画布与预览的占比，双击还原"
         />
 
-        <div className={`ws-side${logCollapsed ? ' log-collapsed' : ''}`}>
-          <PreviewPane initialUrl={project.targetUrl} />
-          <div className="ws-log" ref={logRef}>
-            {logs.length === 0 && <div className="muted" style={{ padding: 10, fontSize: 12 }}>还没有日志。</div>}
-            {logs.map((l, i) => (
-              <div key={i} className={`log-line ${l.level}`}>
-                <span className="mono">{new Date(l.ts).toLocaleTimeString('zh-CN')}</span> {l.text}
+        <div className={`ws-side${logOpen ? (logCollapsed ? ' log-collapsed' : '') : ' log-hidden'}`}>
+          <PreviewPane initialUrl={project.targetUrl} deviceId={project.deviceId} />
+
+          <div className="ws-log-panel">
+            <button className="ws-log-head" onClick={() => setLogOpen((v) => !v)} title={logOpen ? '收起日志' : '展开日志'}>
+              <Icon name={logOpen ? 'caretDown' : 'caretUp'} size={14} />
+              <span>探索日志</span>
+              <span className="muted">{logs.length}</span>
+            </button>
+            {logOpen && (
+              <div className="ws-log" ref={logRef}>
+                {logs.length === 0 && <div className="muted" style={{ padding: '6px 4px', fontSize: 12 }}>还没有日志。</div>}
+                {logs.map((l, i) => (
+                  <div key={i} className={`log-line ${l.level}`}>
+                    <span className="mono">{new Date(l.ts).toLocaleTimeString('zh-CN')}</span> {l.text}
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
           </div>
         </div>
       </div>
