@@ -15,6 +15,27 @@ const CHROME = {
 }
 
 /**
+ * 按屏幕实际显示宽度算出外框各项尺寸。
+ * 全部用比例而非固定像素——预览缩小时固定圆角会把手机啃成圆角矩形。
+ * 比例取自真机观感：屏幕圆角约为宽度的 13%，机身边框约 3%。
+ */
+function frameMetrics(kind: 'mobile' | 'tablet' | 'desktop', w: number) {
+  const radiusRatio = kind === 'mobile' ? 0.13 : kind === 'tablet' ? 0.035 : 0
+  const bezel = kind === 'desktop' ? 0 : Math.max(3, Math.round(w * 0.03))
+  const screenRadius = Math.round(w * radiusRatio)
+  return {
+    bezel,
+    screenRadius,
+    frameRadius: screenRadius + bezel,
+    ring: Math.max(2, Math.round(w * 0.022)),
+    notchW: Math.round(w * 0.29),
+    notchH: Math.max(4, Math.round(w * 0.065)),
+    homeW: Math.round(w * 0.35),
+    btnW: Math.max(2, Math.round(w * 0.012)),
+  }
+}
+
+/**
  * 设备外框。中间那块是纯占位——真正的网页由主进程的 WebContentsView 浮在其上，
  * 所以所有装饰只能画在四周，不能盖住屏幕区。
  *
@@ -99,9 +120,28 @@ export default function DeviceFrame({ device, onScreenRect }: Props) {
     }
   }, [size, onScreenRect, device.id])
 
+  // 外框的圆角、边框、装饰都按屏幕实际显示宽度等比缩放。
+  // 写死 46px 圆角的话，预览一缩小手机就被「啃」成了圆角矩形。
+  // 比例参考真机：iPhone 屏幕圆角约为宽度的 13%，机身边框约 3%。
+  const metrics = frameMetrics(device.kind, size.width)
+
   return (
     <div className="device-box" ref={boxRef}>
-      <div className={`device-frame ${device.kind}`}>
+      <div
+        className={`device-frame ${device.kind}`}
+        style={
+          {
+            '--bezel': `${metrics.bezel}px`,
+            '--screen-radius': `${metrics.screenRadius}px`,
+            '--frame-radius': `${metrics.frameRadius}px`,
+            '--ring': `${metrics.ring}px`,
+            '--notch-w': `${metrics.notchW}px`,
+            '--notch-h': `${metrics.notchH}px`,
+            '--home-w': `${metrics.homeW}px`,
+            '--btn-w': `${metrics.btnW}px`,
+          } as React.CSSProperties
+        }
+      >
         {isPhone && (
           <>
             <div className="notch" />

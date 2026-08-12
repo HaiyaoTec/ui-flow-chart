@@ -58,24 +58,22 @@
   justify-content: center;
 }
 
-/* 外框只画四周，中间的 .screen 必须保持空白且不被遮挡 */
+/* 外框只画四周，中间的 .screen 必须保持空白且不被遮挡。
+   圆角、边框、装饰的尺寸全部由 DeviceFrame 按显示宽度等比算出，
+   写死像素值会让预览缩小时手机变成圆角矩形 */
 .device-frame {
   position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  border-radius: 46px;
+  border-radius: var(--frame-radius, 46px);
   background: #0a0b0e;
   border: 1px solid #33384a;
   box-shadow:
-    0 0 0 9px #1a1d26,
-    0 0 0 10px #3a4055,
+    0 0 0 var(--ring, 9px) #1a1d26,
+    0 0 0 calc(var(--ring, 9px) + 1px) #3a4055,
     0 26px 60px rgba(0, 0, 0, 0.55);
-  padding: 12px;
-}
-.device-frame.tablet {
-  border-radius: 26px;
-  padding: 16px;
+  padding: var(--bezel, 12px);
 }
 .device-frame.desktop {
   border-radius: 12px;
@@ -87,7 +85,7 @@
 
 .device-frame .screen {
   flex: none;
-  border-radius: 34px;
+  border-radius: var(--screen-radius, 34px);
   background: #000;
   overflow: hidden;
 }
@@ -100,45 +98,43 @@
 
 .device-frame .notch {
   position: absolute;
-  top: 16px;
+  top: calc(var(--bezel, 12px) + 2px);
   left: 50%;
   transform: translateX(-50%);
-  width: 96px;
-  height: 22px;
+  width: var(--notch-w, 96px);
+  height: var(--notch-h, 22px);
   background: #0a0b0e;
-  border-radius: 12px;
+  border-radius: calc(var(--notch-h, 22px) / 2);
   z-index: 2;
   pointer-events: none;
 }
 .device-frame .home-bar {
-  height: 4px;
-  width: 110px;
-  margin: 8px auto 2px;
+  height: max(2px, calc(var(--btn-w, 4px) * 0.9));
+  width: var(--home-w, 110px);
+  margin: calc(var(--bezel, 12px) * 0.5) auto 0;
   border-radius: 3px;
   background: #4a5063;
 }
 .device-frame .side-btn {
   position: absolute;
   background: #3a4055;
-  border-radius: 3px;
+  border-radius: 2px;
+  width: var(--btn-w, 4px);
 }
 .device-frame .side-btn.power {
-  right: -13px;
-  top: 130px;
-  width: 4px;
-  height: 74px;
+  right: calc(-1 * var(--ring, 9px) - var(--btn-w, 4px));
+  top: 22%;
+  height: 9%;
 }
 .device-frame .side-btn.vol-up {
-  left: -13px;
-  top: 110px;
-  width: 4px;
-  height: 44px;
+  left: calc(-1 * var(--ring, 9px) - var(--btn-w, 4px));
+  top: 18%;
+  height: 5.5%;
 }
 .device-frame .side-btn.vol-down {
-  left: -13px;
-  top: 164px;
-  width: 4px;
-  height: 44px;
+  left: calc(-1 * var(--ring, 9px) - var(--btn-w, 4px));
+  top: 25%;
+  height: 5.5%;
 }
 
 .device-frame .browser-bar {

@@ -60,26 +60,48 @@
   display: grid;
 }
 
-/* 三档空间分配。人工接管时预览必须够大，否则 430×932 的设备被压到点不动 */
-.ws-body.layout-canvas {
-  grid-template-columns: 1fr 460px;
-}
-.ws-body.layout-split {
-  grid-template-columns: 1fr 1fr;
-}
-/* 竖屏手机的瓶颈在高度而不是宽度，所以「预览为主」要连纵向空间一起让：
-   画布整块收起、日志压到一行高，设备才能真正大到能用手点 */
-.ws-body.layout-preview {
-  grid-template-columns: 0 1fr;
-}
-.layout-preview .ws-canvas {
-  display: none;
+/* 列宽由 WorkspaceView 以内联样式给出（可拖动分栏），两侧各有最小宽度兜底 */
+.ws-body.dragging {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .ws-canvas {
   min-width: 0;
   min-height: 0;
-  border-right: 1px solid var(--line);
+}
+/* 拖动中让原生预览视图别抢指针，否则拖过它上方就断了 */
+.ws-body.dragging .ws-canvas,
+.ws-body.dragging .ws-side {
+  pointer-events: none;
+}
+
+.ws-splitter {
+  position: relative;
+  cursor: col-resize;
+  background: var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+.ws-splitter:hover,
+.ws-body.dragging .ws-splitter {
+  background: var(--accent);
+}
+/* 视觉上是一条细线，实际可抓取区域向两侧各扩 4px，好点中 */
+.ws-splitter::before {
+  content: '';
+  position: absolute;
+  inset: 0 -4px;
+}
+.ws-splitter span {
+  width: 2px;
+  height: 26px;
+  border-radius: 2px;
+  background: var(--bg);
+  opacity: 0.6;
+  pointer-events: none;
 }
 
 .ws-side {
@@ -87,8 +109,8 @@
   grid-template-rows: 1fr 200px;
   min-height: 0;
 }
-/* 预览为主时日志收到一行高，把纵向空间让给设备 */
-.layout-preview .ws-side {
+/* 预览占比很大时说明用户要的是操作空间，日志收到一行高，把纵向让给设备 */
+.ws-side.log-collapsed {
   grid-template-rows: 1fr 72px;
 }
 

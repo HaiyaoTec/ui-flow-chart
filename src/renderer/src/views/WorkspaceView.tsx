@@ -10,10 +10,18 @@ import './workspace.css'
 
 const RUNNING = ['launching', 'observing', 'thinking', 'acting', 'resuming']
 
-/** 画布与预览的空间分配。人工接管时预览必须够大，否则根本点不动 */
-type Layout = 'canvas' | 'split' | 'preview'
+/** 两侧的最小可用宽度：低于这个值画布看不清、预览点不动 */
+const MIN_CANVAS = 320
+const MIN_PREVIEW = 300
+const DEFAULT_PREVIEW = 460
+/** 分栏本身占的宽度，夹取时要一并扣掉，否则画布会比最小宽度再少这一条 */
+const SPLITTER_W = 8
+/** 预览宽到这个比例时，把日志压成一行，把纵向空间让给设备 */
+const LOG_COLLAPSE_RATIO = 0.55
 
-const LAYOUT_LABEL: Record<Layout, string> = {
+type Preset = 'canvas' | 'split' | 'preview'
+
+const PRESET_LABEL: Record<Preset, string> = {
   canvas: '画布为主',
   split: '左右均分',
   preview: '预览为主',
@@ -22,9 +30,11 @@ const LAYOUT_LABEL: Record<Layout, string> = {
 export default function WorkspaceView({ onBack }: { onBack: () => void }) {
   const { project, graph, session, logs, newNodeIds, setSession } = useApp()
   const [exporting, setExporting] = useState('')
-  const [layout, setLayout] = useState<Layout>('canvas')
-  // 用户手动调过布局后就不再自动切换，避免跟人抢方向盘
-  const layoutPinned = useRef(false)
+  const [previewWidth, setPreviewWidth] = useState(DEFAULT_PREVIEW)
+  const [dragging, setDragging] = useState(false)
+  // 用户自己调过分栏后就不再自动改，避免跟人抢方向盘
+  const widthPinned = useRef(false)
+  const bodyRef = useRef<HTMLDivElement>(null)
   const logRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -33,22 +43,59 @@ export default function WorkspaceView({ onBack }: { onBack: () => void }) {
 
   const state = session?.state ?? 'idle'
 
-  // 进入等待人工时自动让位给预览，接管结束再还给画布
+  /** 把宽度夹在两侧最小宽度之间，容器太窄时优先保证预览可用 */
+  const clampWidth = (w: number): number => {
+    const total = bodyRef.current?.clientWidth ?? 0
+    if (!total) return Math.max(MIN_PREVIEW, w)
+    const max = Math.max(MIN_PREVIEW, total - MIN_CANVAS - SPLITTER_W)
+    return Math.min(Math.max(w, MIN_PREVIEW), max)
+  }
+
+  // 进入等待人工时自动把空间让给预览，接管结束再还回画布
   useEffect(() => {
-    if (layoutPinned.current) return
-    setLayout(state === 'awaiting_human' ? 'preview' : 'canvas')
+    if (widthPinned.current) return
+    const total = bodyRef.current?.clientWidth ?? 0
+    setPreviewWidth(state === 'awaiting_human' && total ? clampWidth(total) : DEFAULT_PREVIEW)
   }, [state])
+
+  // 窗口变化时重新夹一次，避免窗口变窄后画布被挤没
+  useEffect(() => {
+    const onResize = () => setPreviewWidth((w) => clampWidth(w))
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  function startDrag(e: React.PointerEvent<HTMLDivElement>) {
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = previewWidth
+    widthPinned.current = true
+    setDragging(true)
+    const onMove = (ev: PointerEvent) => setPreviewWidth(clampWidth(startW - (ev.clientX - startX)))
+    const onUp = () => {
+      setDragging(false)
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+
+  function applyPreset(p: Preset) {
+    widthPinned.current = true
+    const total = bodyRef.current?.clientWidth ?? 0
+    if (p === 'canvas') setPreviewWidth(clampWidth(DEFAULT_PREVIEW))
+    else if (p === 'split') setPreviewWidth(clampWidth(total / 2))
+    else setPreviewWidth(clampWidth(total))
+  }
 
   if (!project || !graph) return null
 
   const running = RUNNING.includes(state)
   const waitingHuman = state === 'awaiting_human'
   const device = getDevice(project.deviceId, project.customDevice)
-
-  function pickLayout(next: Layout) {
-    layoutPinned.current = true
-    setLayout(next)
-  }
+  const bodyWidth = bodyRef.current?.clientWidth ?? 0
+  const logCollapsed = bodyWidth > 0 && previewWidth / bodyWidth >= LOG_COLLAPSE_RATIO
 
   async function start() {
     setSession(await invoke(CH.sessionStart, { projectId: project!.id, goal: project!.goal }))
@@ -89,10 +136,10 @@ export default function WorkspaceView({ onBack }: { onBack: () => void }) {
 
         <span className="grow" />
 
-        <span className="layout-switch">
-          {(Object.keys(LAYOUT_LABEL) as Layout[]).map((k) => (
-            <button key={k} className={layout === k ? 'on' : ''} onClick={() => pickLayout(k)}>
-              {LAYOUT_LABEL[k]}
+        <span className="layout-switch" title="快捷分配，也可以直接拖动中间的分栏">
+          {(Object.keys(PRESET_LABEL) as Preset[]).map((k) => (
+            <button key={k} onClick={() => applyPreset(k)}>
+              {PRESET_LABEL[k]}
             </button>
           ))}
         </span>
@@ -149,12 +196,27 @@ export default function WorkspaceView({ onBack }: { onBack: () => void }) {
         </div>
       )}
 
-      <div className={`ws-body layout-${layout}`}>
+      <div
+        className={`ws-body${dragging ? ' dragging' : ''}`}
+        ref={bodyRef}
+        style={{ gridTemplateColumns: `minmax(0, 1fr) 8px ${previewWidth}px` }}
+      >
         <div className="ws-canvas">
           <FlowCanvas graph={graph} projectId={project.id} device={device} newNodeIds={newNodeIds} />
         </div>
 
-        <div className="ws-side">
+        <div
+          className="ws-splitter"
+          onPointerDown={startDrag}
+          onDoubleClick={() => applyPreset('canvas')}
+          role="separator"
+          aria-orientation="vertical"
+          title="拖动调整画布与预览的占比，双击还原"
+        >
+          <span />
+        </div>
+
+        <div className={`ws-side${logCollapsed ? ' log-collapsed' : ''}`}>
           <PreviewPane initialUrl={project.targetUrl} />
           <div className="ws-log" ref={logRef}>
             {logs.length === 0 && <div className="muted" style={{ padding: 10, fontSize: 12 }}>还没有日志。</div>}
