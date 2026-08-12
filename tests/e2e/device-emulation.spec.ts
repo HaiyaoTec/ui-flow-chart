@@ -60,6 +60,20 @@ test('移动端设备模拟：UA、视口、触摸三项一致，且首个请求
   expect(first!.ua).toMatch(/iPhone/)
 })
 
+test('顶层导航请求本身就要带移动端客户端提示', async () => {
+  // 设备模拟只管客户端视口，不改请求身份。默认情况下顶层导航请求不带
+  // Sec-CH-UA 系列，按客户端提示判端的站点会因此回 PC 版 HTML——
+  // 这正是「模拟看起来没生效」的成因。必须在网络层注入。
+  await openUaEcho('pixel-7')
+  const reqs = await siteRequests()
+  const nav = [...reqs].reverse().find((r) => r.path === '/ua-echo.html')
+
+  expect(nav, '应记录到导航请求').toBeTruthy()
+  expect(nav!.ua, '导航请求的 UA 应是移动端').toMatch(/Android/)
+  expect(nav!.chMobile, '导航请求就应带 Sec-CH-UA-Mobile: ?1').toBe('?1')
+  expect(nav!.chPlatform).toContain('Android')
+})
+
 test('桌面设备模拟：UA、视口与客户端提示都切到桌面档', async () => {
   const info = await openUaEcho('desktop-1920')
 
@@ -72,12 +86,9 @@ test('桌面设备模拟：UA、视口与客户端提示都切到桌面档', asy
   const nav = [...reqs].reverse().find((r) => r.path === '/ua-echo.html')
   expect(nav!.ua).toMatch(/Windows NT/)
 
-  // 实测行为：顶层导航请求只带 UA 字符串，Sec-CH-UA 系列出现在子资源请求上。
-  // 所以客户端提示要到子资源里去断言，否则会误判为 override 没生效。
-  const sub = [...reqs].reverse().find((r) => r.path === '/site.css' && r.chMobile !== '')
-  expect(sub, '应能取到带客户端提示的子资源请求').toBeTruthy()
-  expect(sub!.chMobile).toBe('?0')
-  expect(sub!.chPlatform).toContain('Windows')
+  // 请求身份在网络层统一注入，因此顶层导航与子资源都应带上一致的客户端提示
+  expect(nav!.chMobile, '桌面档应报 ?0').toBe('?0')
+  expect(nav!.chPlatform).toContain('Windows')
 })
 
 test('缩放状态下点击坐标不错位，且事件是 trusted', async () => {

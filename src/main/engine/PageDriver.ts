@@ -1,4 +1,4 @@
-import { nativeImage, WebContentsView, type BrowserWindow, type Debugger } from 'electron'
+import { nativeImage, session, WebContentsView, type BrowserWindow, type Debugger } from 'electron'
 import type { DeviceSpec, ProbeResult } from '@shared/types'
 import { PROBE_SCRIPT, WAIT_IMAGES_SCRIPT } from './probeScript'
 import { signatureOf } from './signature'
@@ -50,6 +50,8 @@ export class PageDriver implements IPageDriver {
    */
   private inputScale = 1
   private bounds: Bounds = { x: 0, y: 0, width: 430, height: 932 }
+  /** 已装过请求头注入器的 partition，避免重复注册 */
+  private identityPartition = ''
   private visible = true
   private onNav?: (url: string, loading: boolean) => void
   private onNavigated?: () => void
@@ -70,6 +72,11 @@ export class PageDriver implements IPageDriver {
     this.destroy()
     this.win = win
     this.device = device
+
+    // session 级 UA 只对「之后创建」的 WebContents 生效，所以必须抢在 new 之前设。
+    // 同时在网络层强制注入客户端提示——设备模拟只管客户端视口，
+    // 不改发给服务器的请求身份；按 Sec-CH-UA 判端的站点否则仍会回 PC 版 HTML。
+    this.installIdentity(partition, device)
 
     const view = new WebContentsView({
       webPreferences: {
@@ -155,6 +162,41 @@ export class PageDriver implements IPageDriver {
   }
 
   /* ------------------------------ 设备模拟 ------------------------------ */
+
+  /**
+   * 把「请求身份」钉在 session 网络层。
+   *
+   * 这一层与设备模拟是两回事：setDeviceMetricsOverride 只改客户端视口，
+   * 服务器看到的仍是默认 UA 与客户端提示。实测顶层导航请求默认不带
+   * Sec-CH-UA 系列（只有子资源带），按客户端提示判端的站点因此回 PC 版 HTML。
+   * 这里对每个请求（含主框架文档）强制覆盖，才能让「模拟」在服务端也成立。
+   */
+  private installIdentity(partition: string, device: DeviceSpec): void {
+    const ses = session.fromPartition(partition)
+    ses.setUserAgent(device.userAgent, 'zh-CN,zh;q=0.9')
+
+    if (this.identityPartition === partition) return
+    this.identityPartition = partition
+    ses.webRequest.onBeforeSendHeaders((details, callback) => {
+      const d = this.device
+      if (!d) return callback({})
+      const headers: Record<string, string | string[]> = { ...details.requestHeaders }
+      headers['User-Agent'] = d.userAgent
+      const m = d.userAgentMetadata
+      if (m) {
+        headers['Sec-CH-UA-Mobile'] = m.mobile ? '?1' : '?0'
+        headers['Sec-CH-UA-Platform'] = `"${m.platform}"`
+        if (m.brands.length) {
+          headers['Sec-CH-UA'] = m.brands.map((b) => `"${b.brand}";v="${b.version}"`).join(', ')
+        } else {
+          // iOS/Safari 档：真实 Safari 根本不发这组头，留着反而露馅
+          delete headers['Sec-CH-UA']
+          delete headers['Sec-CH-UA-Full-Version-List']
+        }
+      }
+      callback({ requestHeaders: headers })
+    })
+  }
 
   /** 应用全套 override。任何设备变更后都要重放一遍，再 reload */
   async applyDevice(device: DeviceSpec, fitScale: number): Promise<void> {

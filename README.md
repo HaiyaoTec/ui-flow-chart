@@ -96,6 +96,8 @@ events.jsonl      人工接管期的控件事件（只记控件标识，不含�
 - **纯说明性的 `<label>` 不该报成可交互元素**，否则「手机号」会优先匹配到标签而不是输入框。
 - **只按坐标填表会落到相邻字段上**，点击后要核对焦点身份再写入。
 - **验证码启发式不要匹配正文关键词**。「验证码」「图形验证」在正常页面的说明文字里很常见，交给有视觉的 AI 判断更准；启发式只管 AI 看不见的跨域 iframe 与 URL 特征。
+- **设备模拟只管客户端视口，不改请求身份**。`setDeviceMetricsOverride` 之类只影响页面内看到的 `innerWidth`/`devicePixelRatio`，服务器收到的仍是默认的 UA 与客户端提示；实测顶层导航请求默认**不带** `Sec-CH-UA` 系列（只有子资源带）。按客户端提示判端的站点因此照样回 PC 版 HTML，看起来就是「模拟没生效」。请求身份必须单独在 session 网络层钉死：`session.setUserAgent` 要抢在 `WebContentsView` 创建**之前**调用（它不影响已存在的 WebContents），再用 `webRequest.onBeforeSendHeaders` 对每个请求强制覆盖 UA 与 `Sec-CH-UA-*`。
+- **不要把裸 CDP 换成 `webContents.enableDeviceEmulation`**。两者底层是同一套 Blink 模拟（都构造 `blink::DeviceEmulationParams`），但 Chromium 的 CDP `EmulationHandler` 会缓存参数并在渲染帧变更时自动重推，原生 API 不会——实测跨源导航后原生方案掉回视图真实尺寸（430×932 变 415×900、dpr 3 变 1.5）。而且 `DeviceEmulationParams` 里没有 touch 字段，原生 API 根本不模拟触摸。对照实验保留在 `src/main/emulation-lab.ts`（`UFC_EMULAB=... electron .` 可复跑）。
 - **CDP 的 scale 与原生视图尺寸必须来自同一次计算**。布局切换时 ResizeObserver 会连发多次矩形，若两者取自不同快照，视图会比 `宽度×缩放` 窄，Chromium 把布局视口撑到视图宽度，页面就被裁掉两侧——而 `innerWidth` 仍然报 430，光看它查不出来。视口同步因此走串行队列，`open()` 期间也定住矩形快照。
 - **设备外框不能只靠 `flex: 1` 撑开**。父级是 `align-items: center` 的 flex 时，高度会退化成内容高度，屏幕区塌成几十像素，人工接管时根本点不动。尺寸改为按可用空间与设备宽高比在 JS 里算。
 
