@@ -42,8 +42,8 @@ export default function ProjectSwitcher({ current, onSwitched, onBackToList }: P
   async function pick(id: string) {
     setOpen(false)
     if (id === current.id) return
-    const { meta, graph } = await invoke(CH.projectOpen, { id })
-    openProject(meta, graph)
+    const { meta, graph, previewBound } = await invoke(CH.projectOpen, { id })
+    openProject(meta, graph, previewBound)
     onSwitched()
   }
 

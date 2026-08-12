@@ -47,7 +47,41 @@ test('弹层展开、面板收起、离开工作台时，原生视图都要让�
     await window.waitForTimeout(500)
     expect(await visible(window), '重新展开后视图应显示').toBe(true)
 
-    // 3. 换过设备再回项目列表——这里曾经留下一块浮在列表上的白色色块
+    // 3. 手动指定缩放：屏幕占位与主进程下发的 scale 都要照做
+    await window.locator('.zoom-select').click()
+    await window.waitForTimeout(400)
+    // 必须精确匹配：150% 也包含「50%」
+    await window.locator('.ufc-select-pop button', { hasText: /^50%$/ }).first().click()
+    await window.waitForTimeout(1200)
+    const zoomed = await ipc<{ fit: number; bounds: { width: number } }>(window, 'test:preview-debug')
+    expect(zoomed.fit, '选了 50% 就该按 0.5 缩放').toBeCloseTo(0.5, 2)
+    expect(zoomed.bounds.width, '视图宽度＝设备宽度 × 0.5').toBe(Math.round(430 * 0.5))
+
+    // 100%：设备按真实尺寸呈现，装不下的部分裁掉，但不能溢出预览列
+    await window.locator('.zoom-select').click()
+    await window.waitForTimeout(400)
+    await window.locator('.ufc-select-pop button', { hasText: /^100%$/ }).first().click()
+    await window.waitForTimeout(1200)
+    const full = await ipc<{ fit: number; bounds: { x: number; y: number; width: number; height: number } }>(
+      window,
+      'test:preview-debug'
+    )
+    expect(full.fit, '选了 100% 就该 1:1 呈现').toBeCloseTo(1, 2)
+    const side = await window.locator('.ws-side').boundingBox()
+    expect(full.bounds.x, '视图不得越过预览列左边界').toBeGreaterThanOrEqual(Math.round(side!.x) - 1)
+    expect(full.bounds.x + full.bounds.width, '视图不得越过预览列右边界').toBeLessThanOrEqual(
+      Math.round(side!.x + side!.width) + 1
+    )
+    expect(full.bounds.height, '超出面板的部分应被裁掉').toBeLessThanOrEqual(Math.round(side!.height))
+
+    await window.locator('.zoom-select').click()
+    await window.waitForTimeout(400)
+    await window.locator('.ufc-select-pop button', { hasText: '自适应' }).first().click()
+    await window.waitForTimeout(1200)
+    const fitted = await ipc<{ fit: number }>(window, 'test:preview-debug')
+    expect(fitted.fit, '回到自适应后不再是 0.5').not.toBeCloseTo(0.5, 2)
+
+    // 4. 换过设备再回项目列表——这里曾经留下一块浮在列表上的白色色块
     await window.locator('.preview-toolbar .ufc-select').click()
     await window.waitForTimeout(400)
     await window.locator('.ufc-select-pop button', { hasText: 'iPhone SE' }).click()

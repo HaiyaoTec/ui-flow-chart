@@ -13,6 +13,8 @@ export class PreviewManager {
   private win: BrowserWindow | null = null
   private device: DeviceSpec = getDevice('iphone-14-pro-max')
   private pane: Bounds = { x: 0, y: 0, width: 430, height: 932 }
+  /** 渲染进程指定的缩放；null 表示按可用空间自适应 */
+  private paneScale: number | null = null
   private partition = 'persist:preview-default'
   private lastUrl = ''
   private opening = false
@@ -38,7 +40,7 @@ export class PreviewManager {
     // 若后面用新矩形算 bounds、却用旧 fit 下发 CDP，两者就会对不上：
     // 视图比 width×scale 窄，页面被裁掉两侧——正是「模拟的高宽不对」的成因。
     const paneAtOpen = this.pane
-    const fit = computeFitScale(device, paneAtOpen)
+    const fit = this.scaleFor(paneAtOpen)
     const trace = (s: string) => process.env.UFC_TRACE === '1' && console.log(`[preview] ${s}`)
 
     try {
@@ -94,13 +96,20 @@ export class PreviewManager {
    *    视图会比 width×scale 更宽，Chromium 就把布局视口撑到视图宽度，
    *    表现就是「网站没识别到设备宽度」——PC 布局塞进手机框里。
    */
-  async setPaneBounds(b: Bounds): Promise<void> {
+  async setPaneBounds(b: Bounds & { scale?: number }): Promise<void> {
     // 明显不合理的矩形一律丢弃：渲染进程在布局未完成时可能报出极小值，
     // 采信它会把原生视图摆到设备外框之外
     if (b.width < 80 || b.height < 80) return
-    this.pane = b
+    this.pane = { x: b.x, y: b.y, width: b.width, height: b.height }
+    // 用户手动指定了缩放时，矩形可能是裁切过的，反推不出比例，只能采信上报值
+    this.paneScale = typeof b.scale === 'number' && b.scale > 0 ? b.scale : null
     if (!this.driver.attached || this.opening) return
     await this.syncViewport()
+  }
+
+  /** 当前应当使用的缩放：渲染进程指定优先，否则按可用空间自适应 */
+  private scaleFor(pane: Bounds): number {
+    return this.paneScale ?? computeFitScale(this.device, pane)
   }
 
   /** 串行下发，且 scale 与 bounds 取自同一快照 */
@@ -109,7 +118,7 @@ export class PreviewManager {
       .then(async () => {
         if (!this.driver.attached || this.opening) return
         const pane = this.pane
-        const fit = computeFitScale(this.device, pane)
+        const fit = this.scaleFor(pane)
         // 面板只是平移时缩放没变，没必要重发 Emulation 命令去打扰页面，
         // 挪一下视图即可；拖拽调窗口大小时这条路径会被高频命中
         if (force || Math.abs(fit - this.driver.currentScale()) > 0.0005) {
@@ -165,9 +174,10 @@ export class PreviewManager {
       fit: this.driver.currentScale(),
       bounds: this.driver.currentBounds(),
       visible: this.driver.isVisible(),
+      // 放大到超出面板时视图会被截断，「应为」也要按可见范围取，否则自检永远报异常
       expected: {
-        width: Math.round(this.device.width * this.driver.currentScale()),
-        height: Math.round(this.device.height * this.driver.currentScale()),
+        width: Math.min(Math.round(this.device.width * this.driver.currentScale()), this.pane.width),
+        height: Math.min(Math.round(this.device.height * this.driver.currentScale()), this.pane.height),
       },
     }
   }
@@ -231,10 +241,26 @@ export class PreviewManager {
     this.driver.destroy()
   }
 
-  /** 视口按 fitScale 缩放后的实际显示尺寸，居中放进占位区 */
-  private applyBounds(pane: Bounds = this.pane, fit = computeFitScale(this.device, pane)): void {
+  /**
+   * 视口按缩放后的实际显示尺寸摆放。
+   *
+   * 常规情况下占位区就等于设备显示尺寸，居中即原地。
+   * 用户手动放大到超出面板时，占位区是裁切过的可见部分：此时左上对齐并按可见
+   * 尺寸截断，超出的部分不画——原生视图不受 HTML 的 overflow 约束，
+   * 不自己截断就会盖到画布和日志上。
+   */
+  private applyBounds(pane: Bounds = this.pane, fit = this.scaleFor(pane)): void {
     const w = Math.round(this.device.width * fit)
     const h = Math.round(this.device.height * fit)
+    if (w > pane.width || h > pane.height) {
+      this.driver.setBounds({
+        x: pane.x,
+        y: pane.y,
+        width: Math.min(w, pane.width),
+        height: Math.min(h, pane.height),
+      })
+      return
+    }
     this.driver.setBounds({
       x: Math.round(pane.x + (pane.width - w) / 2),
       y: Math.round(pane.y + (pane.height - h) / 2),

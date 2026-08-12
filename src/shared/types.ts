@@ -159,6 +159,8 @@ export interface FlowGraph {
 }
 
 export interface GraphPatch {
+  /** 补丁归属的项目。会话在后台跑，渲染进程可能正开着别的项目，必须据此过滤 */
+  projectId?: string
   addedLanes?: FlowLane[]
   addedNodes?: FlowNode[]
   addedEdges?: FlowEdge[]
@@ -210,6 +212,23 @@ export interface ProjectRunSummary {
 }
 
 /* ------------------------------- 探索会话 -------------------------------- */
+
+/**
+ * 「占着预览不放」的会话状态。
+ *
+ * 预览视图全应用只有一个，处在这些状态的会话随时会继续操作它，
+ * 因此不能把它重绑到别的项目上；paused 也算——恢复时会接着在当前页面上动手。
+ */
+export const SESSION_HOLDS_PREVIEW: SessionState[] = [
+  'launching',
+  'observing',
+  'thinking',
+  'acting',
+  'paused',
+  'awaiting_human',
+  'resuming',
+  'finishing',
+]
 
 export type SessionState =
   | 'idle'

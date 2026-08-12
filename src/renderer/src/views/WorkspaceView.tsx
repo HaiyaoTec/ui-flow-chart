@@ -28,8 +28,12 @@ interface Props {
 }
 
 export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
-  const { project, graph, session, logs, newNodeIds, setSession } = useApp()
+  const { project, graph, session: globalSession, logs, newNodeIds, previewBound, setSession } = useApp()
+  const [otherRunningName, setOtherRunningName] = useState('')
   const dialog = useDialog()
+  // 会话在主进程里是全局单例。别的项目在跑时，这里不能拿它的状态来渲染
+  // ——否则工作台会显示成「正在探索」，按钮也变成暂停/结束，操作的却是另一个项目
+  const session = globalSession?.projectId === project?.id ? globalSession : null
   const [exporting, setExporting] = useState('')
   const [previewWidth, setPreviewWidth] = useState(DEFAULT_PREVIEW)
   // 收起状态记在本地，下次进来还是上次的选择
@@ -45,6 +49,13 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
   }, [logs.length, logOpen])
 
   useEffect(() => localStorage.setItem('ufc.logOpen', logOpen ? '1' : '0'), [logOpen])
+
+  // 提示里要能报出「是哪个项目占着预览」，光有 id 说不清
+  useEffect(() => {
+    if (previewBound || !globalSession?.projectId) return setOtherRunningName('')
+    const owner = globalSession.projectId
+    void invoke(CH.projectList).then((list) => setOtherRunningName(list.find((p) => p.id === owner)?.name ?? ''))
+  }, [previewBound, globalSession?.projectId])
 
   const state = session?.state ?? 'idle'
 
@@ -95,7 +106,12 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
   const logCollapsed = bodyWidth > 0 && previewWidth / bodyWidth >= LOG_COLLAPSE_RATIO
 
   async function start() {
-    setSession(await invoke(CH.sessionStart, { projectId: project!.id, goal: project!.goal }))
+    try {
+      setSession(await invoke(CH.sessionStart, { projectId: project!.id, goal: project!.goal }))
+    } catch (e) {
+      // 最常见的是「另一个项目还在跑」——会话与预览都是全局单例，同一时刻只能有一个
+      await dialog.alert({ title: '无法开始探索', message: e instanceof Error ? e.message : String(e) })
+    }
   }
 
   async function doExport(kind: 'html' | 'png') {
@@ -177,6 +193,18 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
           {exporting === 'png' ? '导出中…' : '导出 PNG'}
         </button>
       </div>
+
+      {/* 预览没跟过来时必须说清楚：顶栏已经是新项目，右侧却还是另一个项目的页面 */}
+      {!previewBound && (
+        <div className="notice-banner">
+          <Icon name="warn" size={14} />
+          <span>
+            右侧预览仍属于正在探索的
+            {otherRunningName ? `「${otherRunningName}」` : '另一个项目'}，本项目的页面暂不会显示。
+            结束那边的探索后重新进入本项目即可。
+          </span>
+        </div>
+      )}
 
       {waitingHuman && (
         <div className="takeover-banner">

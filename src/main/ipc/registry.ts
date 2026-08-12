@@ -2,7 +2,7 @@ import { join } from 'node:path'
 import { ipcMain, nativeTheme, shell, type BrowserWindow } from 'electron'
 import { CH, type IpcInvokeMap, type InvokeChannel } from '@shared/ipc-contract'
 import { getDevice } from '@shared/devices'
-import type { FlowGraph } from '@shared/types'
+import { SESSION_HOLDS_PREVIEW, type FlowGraph } from '@shared/types'
 import { createAiClient } from '../ai'
 import { GraphStore } from '../engine/graphStore'
 import { preview } from '../engine/previewManager'
@@ -95,16 +95,19 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
 
     // 预览必须跟着项目走：换项目要换目标地址、设备与会话分区，
     // 否则右侧还停在上一个项目的页面和登录态上。
-    // 正在跑的会话独占预览，此时不去打断它。
+    // 但别的项目的会话正占着预览时不能抢——包括 paused：
+    // 它一恢复就会接着在当前页面上操作，页面被换掉就等于把动作打到了别人身上。
     const busy = sessions.snapshot()
-    const canRebind = busy.projectId !== id && !['observing', 'thinking', 'acting', 'awaiting_human'].includes(busy.state)
-    if (canRebind) {
+    const heldByOther = Boolean(busy.projectId) && busy.projectId !== id && SESSION_HOLDS_PREVIEW.includes(busy.state)
+    if (!heldByOther) {
       void preview
         .open(meta.targetUrl, getDevice(meta.deviceId, meta.customDevice), partitionOf(meta.id))
         .catch(() => undefined)
     }
 
-    return { meta, graph: loadGraph(id) }
+    // previewBound 交给界面提示：不然顶栏显示的是新项目，右侧却还是旧项目的页面，
+    // 用户完全看不出预览没跟过来
+    return { meta, graph: loadGraph(id), previewBound: !heldByOther }
   })
   handle(CH.projectDelete, ({ id }) => {
     deleteProject(id)

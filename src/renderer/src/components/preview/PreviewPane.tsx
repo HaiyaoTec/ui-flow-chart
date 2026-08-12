@@ -7,6 +7,17 @@ import Select from '../Select'
 import DeviceFrame from './DeviceFrame'
 import './preview.css'
 
+/** 缩放档位。指定倍数塞不下时会自动回落到自适应，所以列表可以给到 200% */
+const ZOOM_OPTIONS = [
+  { value: 'fit', label: '自适应' },
+  { value: '2', label: '200%' },
+  { value: '1.5', label: '150%' },
+  { value: '1.25', label: '125%' },
+  { value: '1', label: '100%' },
+  { value: '0.75', label: '75%' },
+  { value: '0.5', label: '50%' },
+]
+
 interface Props {
   initialUrl?: string
   /** 项目指定的设备。工作台里预览归项目所有，下拉框要显示项目真正在用的那台 */
@@ -22,11 +33,18 @@ export default function PreviewPane({ initialUrl = '', deviceId: boundDeviceId, 
   const [busy, setBusy] = useState(false)
   const [diag, setDiag] = useState<PreviewDiagnosis | null>(null)
   const [open, setOpen] = useState(() => localStorage.getItem('ufc.previewOpen') !== '0')
+  const [zoom, setZoom] = useState<'fit' | number>(() => {
+    const v = localStorage.getItem('ufc.previewZoom')
+    return v && v !== 'fit' ? Number(v) : 'fit'
+  })
   /** 屏幕占位区的实际显示宽度，用来算缩放比例 */
   const [shownWidth, setShownWidth] = useState(0)
   const device = getDevice(deviceId)
   const lastRect = useRef('')
   const alive = useRef(true)
+  // onScreenRect 是稳定回调，取当前设备只能走 ref
+  const deviceIdRef = useRef(deviceId)
+  deviceIdRef.current = deviceId
 
   useEffect(() => on(CH.evPreviewNav, setNav), [])
 
@@ -73,13 +91,25 @@ export default function PreviewPane({ initialUrl = '', deviceId: boundDeviceId, 
     void invoke(CH.previewSetVisible, { visible })
   }
 
-  const onScreenRect = useCallback((rect: { x: number; y: number; width: number; height: number }) => {
-    setShownWidth(rect.width)
-    const key = `${rect.x},${rect.y},${rect.width},${rect.height}`
-    if (key === lastRect.current) return
-    lastRect.current = key
-    void invoke(CH.previewSetBounds, rect)
-  }, [])
+  const onScreenRect = useCallback(
+    (rect: { x: number; y: number; width: number; height: number; scale: number }) => {
+      // 显示比例取自 scale 而不是裁切后的宽度，否则放大到超出面板时会算小
+      const dev = getDevice(deviceIdRef.current)
+      setShownWidth(rect.scale * dev.width)
+      setCropped(rect.width < Math.round(dev.width * rect.scale) - 1 || rect.height < Math.round(dev.height * rect.scale) - 1)
+      const key = `${rect.x},${rect.y},${rect.width},${rect.height},${rect.scale.toFixed(4)}`
+      if (key === lastRect.current) return
+      lastRect.current = key
+      void invoke(CH.previewSetBounds, rect)
+    },
+    []
+  )
+
+  function pickZoom(v: string) {
+    const next = v === 'fit' ? 'fit' : Number(v)
+    setZoom(next)
+    localStorage.setItem('ufc.previewZoom', v)
+  }
 
   /** 收起后原生视图必须一起藏起来，否则它会浮在下面的日志上 */
   function toggleOpen(next: boolean) {
@@ -122,7 +152,11 @@ export default function PreviewPane({ initialUrl = '', deviceId: boundDeviceId, 
   }
 
   // 缩放＝屏幕实际显示宽度 ÷ 设备逻辑宽度，与主进程下发给 CDP 的 scale 同源
-  const zoomText = shownWidth > 0 ? `缩放 ${Math.round((shownWidth / device.width) * 100)}%` : ''
+  const actual = shownWidth > 0 ? shownWidth / device.width : 0
+  const zoomText = actual > 0 ? `${Math.round(actual * 100)}%` : ''
+  // 指定倍数按真实比例呈现，装不下就裁切。得说一声，否则用户以为设备被截断是 bug
+  const [cropped, setCropped] = useState(false)
+  const zoomCropped = typeof zoom === 'number' && cropped
 
   async function changeDevice(id: string) {
     setDeviceId(id)
@@ -137,17 +171,31 @@ export default function PreviewPane({ initialUrl = '', deviceId: boundDeviceId, 
 
   return (
     <div className={`preview-pane${open ? '' : ' collapsed'}`}>
-      {/* 与「探索日志」同一套：标题条即开关，右侧显示当前缩放比例 */}
+      {/* 与「探索日志」同一套：标题条即开关，右侧是缩放控制 */}
       <div className="pv-head">
         <button className="pv-head-toggle" onClick={() => toggleOpen(!open)} title={open ? '收起模拟设备' : '展开模拟设备'}>
           <Icon name={open ? 'caretDown' : 'caretUp'} size={14} />
           <span className="pv-head-title">模拟设备</span>
-          <span className="muted">{zoomText}</span>
         </button>
-        <button className="link-btn" onClick={() => void diagnose()} disabled={busy || !open}>
-          <Icon name="diagnose" size={13} />
-          自检
-        </button>
+        {open && (
+          <>
+            {zoomCropped && (
+              <span className="pv-zoom-note" title="按真实比例呈现，超出面板的部分未显示。拉宽预览列、放大窗口或改用自适应可以看到完整设备">
+                部分裁切
+              </span>
+            )}
+            <Select
+              className="zoom-select"
+              value={String(zoom)}
+              onChange={(v) => pickZoom(v)}
+              options={ZOOM_OPTIONS.map((o) => ({
+                value: o.value,
+                label: o.value === 'fit' ? `自适应${zoomText ? ` ${zoomText}` : ''}` : o.label,
+              }))}
+              onOpenChange={(o) => showView(!o)}
+            />
+          </>
+        )}
       </div>
 
       <div className="preview-toolbar">
@@ -190,7 +238,7 @@ export default function PreviewPane({ initialUrl = '', deviceId: boundDeviceId, 
       </div>
 
       <div className="preview-stage">
-        <DeviceFrame device={device} onScreenRect={onScreenRect} />
+        <DeviceFrame device={device} zoom={zoom} onScreenRect={onScreenRect} />
       </div>
 
       <div className="preview-meta">
@@ -200,6 +248,10 @@ export default function PreviewPane({ initialUrl = '', deviceId: boundDeviceId, 
         <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {nav?.url || '(未导航)'}
         </span>
+        <button className="link-btn" onClick={() => void diagnose()} disabled={busy}>
+          <Icon name="diagnose" size={13} />
+          自检
+        </button>
       </div>
 
       {diag && (

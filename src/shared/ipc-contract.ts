@@ -114,7 +114,11 @@ export interface IpcInvokeMap {
     res: ProjectMeta
   }
   [CH.projectList]: { req: void; res: ProjectMeta[] }
-  [CH.projectOpen]: { req: { id: string }; res: { meta: ProjectMeta; graph: FlowGraph } }
+  [CH.projectOpen]: {
+    req: { id: string }
+    /** previewBound=false 表示预览仍被另一个项目的会话占着，界面要提示 */
+    res: { meta: ProjectMeta; graph: FlowGraph; previewBound: boolean }
+  }
   [CH.projectDelete]: { req: { id: string }; res: void }
   [CH.projectClearSession]: { req: { id: string }; res: void }
 
@@ -126,7 +130,8 @@ export interface IpcInvokeMap {
   [CH.sessionTakeoverEnd]: { req: void; res: SessionSnapshot }
   [CH.sessionSnapshot]: { req: void; res: SessionSnapshot }
 
-  [CH.previewSetBounds]: { req: Bounds; res: void }
+  /** scale 由渲染进程给出：手动放大时矩形是裁切过的，主进程反推不出比例 */
+  [CH.previewSetBounds]: { req: Bounds & { scale?: number }; res: void }
   [CH.previewSetVisible]: { req: { visible: boolean }; res: void }
   [CH.previewSetDevice]: { req: { deviceId: string; custom?: DeviceSpec }; res: void }
   [CH.previewNavigate]: { req: { url?: string; action?: 'back' | 'reload' }; res: void }

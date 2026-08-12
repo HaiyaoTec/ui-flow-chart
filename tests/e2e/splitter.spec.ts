@@ -32,14 +32,15 @@ test('拖动分栏调整占比，两侧最小宽度不被突破', async () => {
         }
       })
 
-    // 两条工具栏并排，高度必须一致，否则中缝两侧的分隔线错位
+    // 左右两列的第一条栏并排，高度必须一致，否则中缝两侧的分隔线错位
     const bars = await window.evaluate(() => {
       const h = (s: string) => Math.round(document.querySelector(s)?.getBoundingClientRect().height ?? -1)
-      return { canvas: h('.canvas-toolbar'), preview: h('.preview-toolbar') }
+      return { canvas: h('.canvas-toolbar'), head: h('.pv-head'), preview: h('.preview-toolbar') }
     })
     // 先确认真的量到了：两个都取不到时也会「相等」，那样断言等于没测
     expect(bars.canvas, '没找到画布工具栏').toBeGreaterThan(30)
-    expect(bars.canvas, `画布工具栏 ${bars.canvas} 应等于预览工具栏 ${bars.preview}`).toBe(bars.preview)
+    expect(bars.canvas, `画布工具栏 ${bars.canvas} 应等于「模拟设备」标题条 ${bars.head}`).toBe(bars.head)
+    expect(bars.preview, `预览工具栏 ${bars.preview} 也应是同一高度`).toBe(bars.canvas)
 
     const splitter = window.locator('.ws-splitter')
     await expect(splitter).toBeVisible()

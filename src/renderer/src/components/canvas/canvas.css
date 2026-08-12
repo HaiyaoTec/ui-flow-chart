@@ -12,13 +12,16 @@
   display: flex;
   gap: 8px;
   align-items: center;
-  padding: 6px 12px;
+  /* 纵向内边距压到让 min-height 说了算：内容一旦撑过 46px，
+     这条栏就会比对面的高出一两像素，中缝两侧的分隔线随即错位 */
+  padding: 5px 12px;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
   flex-wrap: wrap;
 }
-/* 与预览工具栏同高：两条栏并排，差几像素分隔线就对不齐 */
-.canvas-toolbar {
+/* 与预览一侧的两条栏同高：并排放着，差几像素分隔线就对不齐 */
+.canvas-toolbar,
+.canvas-lanes {
   min-height: var(--toolbar-h);
 }
 .canvas-toolbar button {

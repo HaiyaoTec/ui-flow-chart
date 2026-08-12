@@ -1,7 +1,14 @@
 import { Notification, type BrowserWindow } from 'electron'
 import { getDevice } from '@shared/devices'
 import { CH } from '@shared/ipc-contract'
-import type { FlowEdge, FlowLane, FlowNode, SessionBudgets, SessionSnapshot } from '@shared/types'
+import {
+  SESSION_HOLDS_PREVIEW,
+  type FlowEdge,
+  type FlowLane,
+  type FlowNode,
+  type SessionBudgets,
+  type SessionSnapshot,
+} from '@shared/types'
 import { createAiClient } from '../ai'
 import { getProject, partitionOf, touchProject, updateProjectRun } from '../store/projects'
 import { ExplorerSession } from './ExplorerSession'
@@ -65,6 +72,15 @@ class SessionManager {
     const meta = getProject(projectId)
     if (!meta) throw new Error('项目不存在')
 
+    // 会话与预览都是全局单例。直接覆盖 this.session 的话，上一个会话既停不下来、
+    // 也再也拿不到引用，而它的 openTarget 还会把预览抢去自己的地址——
+    // 两个项目的操作会打在同一个页面上。
+    const cur = this.session?.snapshot()
+    if (cur && cur.projectId && cur.projectId !== projectId && SESSION_HOLDS_PREVIEW.includes(cur.state)) {
+      const name = getProject(cur.projectId)?.name ?? cur.projectId
+      throw new Error(`「${name}」的探索尚未结束（${cur.state}），请先结束它再开始新的探索`)
+    }
+
     const ai = createAiClient(meta.aiProfileId)
     this.session = new ExplorerSession({
       driver: preview.driver,
@@ -82,8 +98,9 @@ class SessionManager {
           this.persistRun(meta.id, snapshot, event.kind === 'state-changed' ? event.reason : undefined)
         }
       },
+      // 带上项目 id：渲染进程可能正开着另一个项目，补丁不能画错地方
       emitPatch: (lanes: FlowLane[], nodes: FlowNode[], edges: FlowEdge[]) =>
-        this.send(CH.evGraphPatch, { addedLanes: lanes, addedNodes: nodes, addedEdges: edges }),
+        this.send(CH.evGraphPatch, { projectId: meta.id, addedLanes: lanes, addedNodes: nodes, addedEdges: edges }),
     })
     return this.session
   }
@@ -91,8 +108,9 @@ class SessionManager {
   async start(projectId: string, goal?: string, budgets?: Partial<SessionBudgets>): Promise<SessionSnapshot> {
     const meta = getProject(projectId)
     if (!meta) throw new Error('项目不存在')
-    touchProject(projectId)
+    // ensure 可能因为另一个项目还在跑而拒绝，先过它这关再动项目元数据
     const session = this.ensure(projectId)
+    touchProject(projectId)
     return session.start(meta, goal ?? meta.goal, budgets)
   }
 

@@ -8,8 +8,10 @@
 /* 区块标题条：与「探索日志」同款——整条即开关，右侧留出当前缩放与自检 */
 .pv-head {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   flex: none;
+  /* 与画布工具栏同高：两列并排，标题条错开一点就很明显 */
+  min-height: var(--toolbar-h);
   padding-right: 8px;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
@@ -17,10 +19,12 @@
 .pv-head-toggle {
   display: flex;
   align-items: center;
+  /* 全局 button 是居中对齐的，这里必须显式靠左，否则标题会飘到中间 */
+  justify-content: flex-start;
   gap: 8px;
   flex: 1;
   min-width: 0;
-  padding: 7px 10px;
+  padding: 0 10px;
   font-size: 12px;
   text-align: left;
   background: transparent;
@@ -34,9 +38,33 @@
 .pv-head-title {
   color: var(--fg);
 }
-.pv-head-toggle .muted {
-  margin-left: auto;
+/* 指定倍数被面板尺寸压回去时的说明 */
+.pv-zoom-note {
+  align-self: center;
+  flex: none;
+  font-size: 11.5px;
+  color: var(--branch);
   font-variant-numeric: tabular-nums;
+  cursor: help;
+}
+
+/* 缩放选择器压成标题条里的轻量控件，不抢标题的视觉层级 */
+.pv-head .zoom-select {
+  flex: none;
+  align-self: center;
+  width: auto;
+  min-width: 104px;
+  padding: 3px 5px 3px 9px;
+  font-size: 12px;
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+}
+.pv-head .zoom-select:hover:not(:disabled) {
+  background: var(--panel-2);
+}
+.pv-head .zoom-select.open {
+  border-color: var(--accent);
 }
 
 /* 收起时整块模拟器让位，原生视图也会同步隐藏 */
@@ -52,7 +80,8 @@
   display: flex;
   gap: 6px;
   align-items: center;
-  padding: 6px 10px;
+  /* 同上：内容不能撑过 --toolbar-h，否则与画布那侧差一两像素 */
+  padding: 5px 10px;
   min-height: var(--toolbar-h);
   border-bottom: 1px solid var(--line);
   background: var(--panel);
@@ -109,6 +138,12 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
+}
+/* 指定倍数放大到装不下时靠左上，居中会把状态栏也切掉 */
+.device-box[data-overflow='1'] {
+  align-items: flex-start;
+  justify-content: flex-start;
 }
 
 /* 外框只画四周，中间的 .screen 必须保持空白且不被遮挡。

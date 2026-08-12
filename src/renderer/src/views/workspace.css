@@ -54,6 +54,22 @@
   font-size: 12.5px;
 }
 
+/* 中性提示条：说明当前状态，不是错误也不是需要立刻处理的事 */
+.notice-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  font-size: 12.5px;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--back) 12%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--back) 40%, transparent);
+}
+.notice-banner .icon {
+  flex: none;
+  color: var(--back);
+}
+
 .ws-body {
   flex: 1;
   min-height: 0;
@@ -118,10 +134,13 @@
 .ws-log-head {
   display: flex;
   align-items: center;
+  /* 全局 button 居中对齐，这里要显式靠左 */
+  justify-content: flex-start;
   gap: 8px;
   width: 100%;
   flex: none;
-  padding: 7px 10px;
+  min-height: var(--toolbar-h);
+  padding: 0 10px;
   font-size: 12px;
   text-align: left;
   background: transparent;

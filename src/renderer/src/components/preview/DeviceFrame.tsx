@@ -4,8 +4,10 @@ import StatusBar from './StatusBar'
 
 interface Props {
   device: DeviceSpec
-  /** 屏幕占位区的矩形变化时回调，主进程据此摆放 WebContentsView */
-  onScreenRect: (rect: { x: number; y: number; width: number; height: number }) => void
+  /** 'fit' 为按可用空间自适应，数字为指定缩放倍数（塞不下时自动回落到自适应） */
+  zoom?: 'fit' | number
+  /** 屏幕占位区的可见矩形变化时回调，主进程据此摆放 WebContentsView */
+  onScreenRect: (rect: { x: number; y: number; width: number; height: number; scale: number }) => void
 }
 
 /** 状态栏高度占屏幕显示宽度的比例，取自真机（430 宽对约 50 高） */
@@ -46,7 +48,7 @@ function frameMetrics(kind: 'mobile' | 'tablet' | 'desktop', w: number) {
  * 屏幕尺寸用 JS 按可用空间与设备宽高比算出来，不靠 CSS aspect-ratio：
  * 嵌套 flex 里 aspect-ratio 的解析结果不稳定，实测会被拉成容器宽度。
  */
-export default function DeviceFrame({ device, onScreenRect }: Props) {
+export default function DeviceFrame({ device, zoom = 'fit', onScreenRect }: Props) {
   const boxRef = useRef<HTMLDivElement>(null)
   const screenRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ width: 0, height: 0 })
@@ -73,8 +75,14 @@ export default function DeviceFrame({ device, onScreenRect }: Props) {
       w = availW
       h = w / ratio
     }
+    // 指定了倍数就按真实比例呈现，哪怕比可用区大——超出的部分由上报矩形时裁掉，
+    // 原生视图始终被限制在预览区内，不会盖到画布上
+    if (typeof zoom === 'number') {
+      w = device.width * zoom
+      h = device.height * zoom
+    }
     setSize({ width: Math.round(w), height: Math.round(h) })
-  }, [device.kind, device.width, device.height])
+  }, [device.kind, device.width, device.height, zoom])
 
   useLayoutEffect(() => {
     measure()
@@ -101,13 +109,23 @@ export default function DeviceFrame({ device, onScreenRect }: Props) {
     const report = () => {
       const r = el.getBoundingClientRect()
       if (r.width < 80 || r.height < 80) return
+      // 与舞台可见区求交：指定倍数时设备框可能比面板大，直接上报会让原生视图
+      // 盖到画布和日志上。裁掉的部分就是看不见的部分，缩放本身不受影响。
+      const stage = boxRef.current?.parentElement?.getBoundingClientRect()
+      const left = Math.max(r.left, stage?.left ?? r.left)
+      const top = Math.max(r.top, stage?.top ?? r.top)
+      const right = Math.min(r.right, stage?.right ?? r.right)
+      const bottom = Math.min(r.bottom, stage?.bottom ?? r.bottom)
       const rect = {
-        x: Math.round(r.x),
-        y: Math.round(r.y),
-        width: Math.round(r.width),
-        height: Math.round(r.height),
+        x: Math.round(left),
+        y: Math.round(top),
+        width: Math.round(right - left),
+        height: Math.round(bottom - top),
+        // 缩放由渲染进程说了算：裁切后的矩形算不出正确的比例
+        scale: size.width / device.width,
       }
-      const key = `${rect.x},${rect.y},${rect.width},${rect.height}`
+      if (rect.width < 80 || rect.height < 80) return
+      const key = `${rect.x},${rect.y},${rect.width},${rect.height},${rect.scale.toFixed(4)}`
       if (key === last) return
       last = key
       onScreenRect(rect)
@@ -132,8 +150,11 @@ export default function DeviceFrame({ device, onScreenRect }: Props) {
   // 比例参考真机：iPhone 屏幕圆角约为宽度的 13%，机身边框约 3%。
   const metrics = frameMetrics(device.kind, size.width)
 
+  // 放大到超出可用区时改为左上对齐：居中的话连状态栏都被切掉了
+  const overflow = size.width > 0 && Boolean(boxRef.current) && size.height + CHROME[device.kind].y > (boxRef.current?.clientHeight ?? 0)
+
   return (
-    <div className="device-box" ref={boxRef}>
+    <div className="device-box" ref={boxRef} data-overflow={overflow ? '1' : undefined}>
       <div
         className={`device-frame ${device.kind}`}
         style={

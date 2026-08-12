@@ -123,8 +123,8 @@ export default function ProjectsView({ onOpened }: Props) {
   }
 
   async function openOne(id: string) {
-    const { meta, graph } = await invoke(CH.projectOpen, { id })
-    openProject(meta, graph)
+    const { meta, graph, previewBound } = await invoke(CH.projectOpen, { id })
+    openProject(meta, graph, previewBound)
     onOpened()
   }
 
