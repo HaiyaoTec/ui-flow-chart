@@ -53,13 +53,26 @@ export function createMainWindow(): BaseWindow {
   })
   uiView = view
   win.contentView.addChildView(view)
+  applyViewBackground()
 
-  const fit = (): void => {
-    const [w, h] = win.getContentSize()
+  /**
+   * 界面视图的尺寸要自己维护——BaseWindow 不像 BrowserWindow 那样自动铺满。
+   *
+   * 关键是必须赶在窗口真正改变尺寸「之前」下发：只监听 resize 的话，
+   * 视图总慢一帧，拖动边框时就会把上一帧的画面留在新露出的区域里，看着像残影。
+   * will-resize 给的是窗口外框尺寸，减掉边框与标题栏的差值才是内容区。
+   */
+  const fit = (contentW?: number, contentH?: number): void => {
+    const [w, h] = contentW && contentH ? [contentW, contentH] : win.getContentSize()
     view.setBounds({ x: 0, y: 0, width: w, height: h })
   }
   fit()
-  win.on('resize', fit)
+  win.on('will-resize', (_e, next) => {
+    const outer = win.getBounds()
+    const inner = win.getContentBounds()
+    fit(next.width - (outer.width - inner.width), next.height - (outer.height - inner.height))
+  })
+  win.on('resize', () => fit())
 
   view.webContents.once('did-finish-load', () => win.show())
 
@@ -72,6 +85,7 @@ export function createMainWindow(): BaseWindow {
   // 跟随系统时，系统深浅色一变，窗口底色也要跟着换
   const syncBackground = (): void => {
     if (!win.isDestroyed()) win.setBackgroundColor(themeBackground())
+    applyViewBackground()
   }
   nativeTheme.on('updated', syncBackground)
   win.on('closed', () => {
@@ -90,4 +104,15 @@ export function createMainWindow(): BaseWindow {
 
 export function getUiView(): WebContentsView | null {
   return uiView
+}
+
+/**
+ * 界面视图自己的底色。
+ *
+ * 拖动窗口边框时，视图先被放大、渲染进程的新帧要晚一步才到，中间这块区域画的是
+ * 视图的底色——不设的话就是黑的，表现为右侧/下方闪出一条黑边。
+ * 窗口底色管不到这里：界面已经是覆盖在窗口上的子视图了。
+ */
+export function applyViewBackground(): void {
+  uiView?.setBackgroundColor(themeBackground())
 }

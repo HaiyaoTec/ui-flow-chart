@@ -55,7 +55,15 @@ export class PreviewManager {
     const win = this.win
     if (!win || win.isDestroyed()) return
     const top = front === 'ui' ? getUiView() : this.driver.view
-    if (top) win.contentView.addChildView(top)
+    if (!top) return
+    // 必须先摘再挂：对已经是子视图的 view 直接 addChildView 不保证重排，
+    // 那样界面根本升不到最上层，网页照旧压着弹层
+    try {
+      win.contentView.removeChildView(top)
+    } catch {
+      /* 不是子视图就直接挂 */
+    }
+    win.contentView.addChildView(top)
   }
 
   /** 打开目标站。每次都重建 view 并在导航前铺好 override */
@@ -110,13 +118,23 @@ export class PreviewManager {
     this.emitNav()
   }
 
-  /** 切换设备 = 重放全部 override + 重新加载，不能只改 bounds */
+  /**
+   * 切换设备 = 重放全部 override + 重新加载，不能只改 bounds。
+   *
+   * 期间必须把视图藏起来等新矩形：设备尺寸变了、渲染进程报来的占位矩形还是旧的，
+   * 视图宽高与页面视口对不上，Chromium 会拿旧图块去铺满新尺寸——
+   * 表现就是同一张页面在框里横竖各重复一遍。
+   * 重载后再自检一次：UA 或视口覆盖没落到这次加载上时会自动重放，
+   * 否则站点会按桌面版排版，塞进手机框里就是一片密密麻麻的小卡片。
+   */
   async setDevice(device: DeviceSpec): Promise<void> {
     this.device = device
     if (!this.driver.attached) return
+    this.holdUntilPane()
     // 换设备必须重放全部 override，即使缩放恰好没变
     await this.syncViewport(true)
     await this.driver.reload()
+    await this.verifyAndHeal().catch(() => null)
     this.emitNav()
   }
 

@@ -18,6 +18,11 @@
 .ws-bar .grow {
   flex: 1;
 }
+/* 下拉触发器默认是块级铺满的（表单里需要这样），放进工具栏得收回按钮尺寸 */
+.ws-bar .ufc-select {
+  width: auto;
+  flex: none;
+}
 
 .state-chip {
   font-size: 11.5px;

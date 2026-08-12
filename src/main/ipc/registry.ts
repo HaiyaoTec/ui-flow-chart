@@ -20,7 +20,7 @@ import {
   partitionOf,
 } from '../store/projects'
 import { getSettings, setSettings } from '../store/settings'
-import { themeBackground } from '../window'
+import { applyViewBackground, themeBackground } from '../window'
 
 type Handler<C extends InvokeChannel> = (
   payload: IpcInvokeMap[C]['req']
@@ -72,8 +72,9 @@ export function registerIpc(getWindow: () => BaseWindow | null): void {
     // prefers-color-scheme 会跟着变，系统原生弹窗也一致
     nativeTheme.themeSource = theme
     const next = setSettings({ theme })
-    // 窗口底色也要跟着换，否则缩放窗口时边缘会闪出另一套主题的颜色
+    // 窗口与界面视图的底色都要跟着换，否则缩放窗口时边缘会闪出另一套主题的颜色
     getWindow()?.setBackgroundColor(themeBackground())
+    applyViewBackground()
     return next
   })
 
