@@ -80,6 +80,23 @@ test('弹层展开、面板收起、离开工作台时，原生视图都要让�
     await window.locator('.preview-toolbar .ufc-select').click()
     await window.waitForTimeout(500)
     expect(await visible(window), '下拉展开时视图应隐藏').toBe(false)
+
+    // 藏起来之后要有静帧顶上，否则用户看到的是一片黑，以为预览崩了。
+    // 抓图必须在主进程里先于隐藏完成——拆成两次 IPC 的话隐藏先执行，截图必然失败
+    await window.waitForTimeout(1200)
+    const frozen = await window.evaluate(() => {
+      const img = document.querySelector('.screen-frozen') as HTMLImageElement | null
+      return img ? { w: img.naturalWidth, h: img.naturalHeight } : null
+    })
+    expect(frozen, '视图藏起时应有静帧占位').not.toBeNull()
+    expect(frozen!.w, '静帧应是真实画面而不是空图').toBeGreaterThan(100)
+
+    // 弹层不能顶出窗口
+    const popBox = await window.locator('.ufc-select-pop').boundingBox()
+    const vw = await window.evaluate(() => window.innerWidth)
+    expect(popBox!.x, '弹层不得越过窗口左边界').toBeGreaterThanOrEqual(0)
+    expect(Math.round(popBox!.x + popBox!.width), '弹层不得越过窗口右边界').toBeLessThanOrEqual(vw)
+
     await window.keyboard.press('Escape')
     await window.waitForTimeout(500)
     expect(await visible(window), '下拉关闭后视图应恢复').toBe(true)

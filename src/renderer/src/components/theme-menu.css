@@ -32,10 +32,15 @@
   color: var(--muted);
 }
 
+/* 宽度不能跟着触发器走：侧边栏收起后触发器只有一个图标宽，
+   拉伸到 right:0 的话每个选项都会被压成一列竖排的字 */
 .theme-pop {
   position: absolute;
   left: 0;
-  right: 0;
+  right: auto;
+  width: max-content;
+  min-width: 100%;
+  max-width: 240px;
   bottom: calc(100% + 6px);
   z-index: 50;
   padding: 5px;
@@ -47,8 +52,10 @@
 .theme-pop button {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 8px;
   width: 100%;
+  white-space: nowrap;
   text-align: left;
   background: transparent;
   border-color: transparent;

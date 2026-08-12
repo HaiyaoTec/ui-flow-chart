@@ -43,7 +43,6 @@ export const CH = {
   previewNavigate: 'preview:navigate',
   previewProbe: 'preview:probe',
   previewDiagnose: 'preview:diagnose',
-  previewSnapshot: 'preview:snapshot',
 
   graphUpdateNode: 'graph:update-node',
   graphUpdateEdge: 'graph:update-edge',
@@ -133,13 +132,16 @@ export interface IpcInvokeMap {
 
   /** scale 由渲染进程给出：手动放大时矩形是裁切过的，主进程反推不出比例 */
   [CH.previewSetBounds]: { req: Bounds & { scale?: number }; res: void }
-  [CH.previewSetVisible]: { req: { visible: boolean }; res: void }
+  /**
+   * withSnapshot：隐藏之前先抓一张静帧一并返回。
+   * 必须在主进程里连着做——分成两次调用的话隐藏会先执行，
+   * 对已经隐藏的视图截图只会失败，占位就退化成一片黑。
+   */
+  [CH.previewSetVisible]: { req: { visible: boolean; withSnapshot?: boolean }; res: { image: string } }
   [CH.previewSetDevice]: { req: { deviceId: string; custom?: DeviceSpec }; res: void }
   [CH.previewNavigate]: { req: { url?: string; action?: 'back' | 'reload' }; res: void }
   [CH.previewProbe]: { req: void; res: unknown }
   [CH.previewDiagnose]: { req: void; res: PreviewDiagnosis }
-  /** 取当前画面的静帧，用于视图被临时藏起时占位（data URI，取不到时为空串） */
-  [CH.previewSnapshot]: { req: void; res: { image: string } }
 
   [CH.graphUpdateNode]: { req: { id: string; patch: Record<string, unknown> }; res: void }
   [CH.graphUpdateEdge]: { req: { id: string; patch: Record<string, unknown> }; res: void }

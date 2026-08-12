@@ -126,17 +126,17 @@ export default function PreviewPane({
    * 藏起来之前先抓一张静帧顶上：视图一藏，露出的就是设备的黑屏底色，
    * 看着像预览崩了。有了静帧，观感是「画面定住」，弹层关掉又接着动。
    */
-  const showView = (visible: boolean) => {
+  const showView = (visible: boolean, snapshot = false) => {
     if (!alive.current) return
-    if (!visible) {
-      void invoke(CH.previewSnapshot)
-        .then((r) => alive.current && setFrozen(r.image))
-        .catch(() => undefined)
-    } else {
-      setFrozen('')
-    }
+    if (visible) setFrozen('')
     setViewHidden(!visible)
-    void invoke(CH.previewSetVisible, { visible })
+    // 只有「会停留一会儿、且用户正盯着设备」的场景才抓静帧：抓图要一两百毫秒，
+    // 拖动分栏、缩放窗口这类必须立刻隐藏的场景不能等它，否则拖影照样出现
+    void invoke(CH.previewSetVisible, { visible, withSnapshot: !visible && snapshot })
+      .then((r) => {
+        if (alive.current && !visible && r.image) setFrozen(r.image)
+      })
+      .catch(() => undefined)
   }
 
   const onScreenRect = useCallback(
@@ -209,7 +209,7 @@ export default function PreviewPane({
     onDeviceChange?.(id)
     setBusy(true)
     setSwitching(true)
-    showView(false)
+    showView(false, true)
     try {
       await invoke(CH.previewSetDevice, { deviceId: id })
     } finally {
@@ -237,7 +237,7 @@ export default function PreviewPane({
                 value: o.value,
                 label: o.value === 'fit' ? `自适应${zoomText ? ` ${zoomText}` : ''}` : o.label,
               }))}
-              onOpenChange={(o) => showView(!o && open && !suppressed)}
+              onOpenChange={(o) => showView(!o && open && !suppressed, o)}
             />
           </>
         )}
@@ -255,7 +255,7 @@ export default function PreviewPane({
             hint: `${d.width}×${d.height}@${d.deviceScaleFactor}x`,
           }))}
           // 自绘弹层是 HTML，原生视图永远画在它上面，展开期间先把视图藏起来
-          onOpenChange={(popped) => showView(!popped && open && !suppressed)}
+          onOpenChange={(popped) => showView(!popped && open && !suppressed, popped)}
         />
         <input
           className="url"

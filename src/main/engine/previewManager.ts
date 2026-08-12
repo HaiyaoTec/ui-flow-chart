@@ -176,10 +176,27 @@ export class PreviewManager {
     return this.applyChain
   }
 
-  setVisible(visible: boolean): void {
+  /**
+   * 切换视图可见性。
+   *
+   * withSnapshot：隐藏之前先抓一张当前画面。抓图与隐藏必须连着做——
+   * 拆成两次 IPC 的话隐藏会先执行，对已隐藏的视图截图只会失败，
+   * 占位就退化成一片黑。
+   */
+  async setVisible(visible: boolean, withSnapshot = false): Promise<{ image: string }> {
+    let image = ''
+    if (!visible && withSnapshot && this.driver.attached && this.driver.isVisible()) {
+      try {
+        const shot = await this.driver.screenshot()
+        image = `data:image/jpeg;base64,${shot.jpegBase64}`
+      } catch {
+        // 抓不到就退回文字占位，不影响隐藏本身
+      }
+    }
     this.wantVisible = visible
     // 等待新矩形期间只记意愿，不真的显示——否则又会在旧位置画一帧
     this.driver.setVisible(visible && !this.awaitingPane)
+    return { image }
   }
 
   /**

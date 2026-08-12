@@ -71,11 +71,14 @@ export default function Select({
       const wanted = Math.min(options.length * 38 + 10, 320)
       const below = window.innerHeight - b.bottom - 8
       const drop = below < wanted && b.top > below ? 'up' : 'down'
+      // 触发器可能被挤得很窄（预览工具栏），弹层得给选项留出可读宽度
+      const width = Math.min(Math.max(b.width, 260), window.innerWidth - 16)
+      // 靠右的触发器要改成右对齐，否则弹层会顶出窗口
+      const left = Math.min(Math.max(8, b.left), window.innerWidth - width - 8)
       setRect({
-        left: b.left,
+        left,
         top: drop === 'down' ? b.bottom + 5 : b.top - 5,
-        // 触发器可能被挤得很窄（预览工具栏），弹层得给选项留出可读宽度
-        width: Math.max(b.width, 260),
+        width,
         drop,
       })
     }

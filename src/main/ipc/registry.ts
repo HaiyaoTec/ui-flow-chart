@@ -125,27 +125,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
 
   /* --------------------------------- 预览 --------------------------------- */
   handle(CH.previewSetBounds, (b) => preview.setPaneBounds(b))
-  handle(CH.previewSetVisible, ({ visible }) => preview.setVisible(visible))
+  handle(CH.previewSetVisible, ({ visible, withSnapshot }) => preview.setVisible(visible, withSnapshot))
   handle(CH.previewSetDevice, ({ deviceId, custom }) => preview.setDevice(getDevice(deviceId, custom)))
   handle(CH.previewNavigate, (input) => preview.navigate(input))
   handle(CH.previewProbe, () => preview.driver.probe())
   handle(CH.previewDiagnose, () => preview.diagnose())
-  /**
-   * 静帧占位。
-   *
-   * 原生视图永远盖在 HTML 之上，自绘弹层展开时只能先把它藏起来；
-   * 藏起来就露出设备的黑屏底色，看着像坏了。先取一张当前画面顶上，
-   * 用户看到的就是「画面定住了」而不是「黑屏」。
-   */
-  handle(CH.previewSnapshot, async () => {
-    if (!preview.driver.attached) return { image: '' }
-    try {
-      const shot = await preview.driver.screenshot()
-      return { image: `data:image/jpeg;base64,${shot.jpegBase64}` }
-    } catch {
-      return { image: '' }
-    }
-  })
 
   /* --------------------------------- 图谱 --------------------------------- */
   handle(CH.graphUpdateNode, ({ id, patch }) => {
