@@ -76,30 +76,22 @@ test('弹层展开、面板收起、离开工作台时，原生视图都要让�
     await ipc(window, 'test:resize-window', { dw: -56, dh: 0 })
     await window.waitForTimeout(1200)
 
-    // 1. 设备下拉：弹层是 HTML，展开期间视图必须藏起来
+    /*
+     * 1. 压在预览上的下拉走系统菜单。
+     *
+     * 它由操作系统合成，天然在原生视图之上，因此不需要把视图藏起来——
+     * 先前靠隐藏让路的做法既慢（要先抓帧）又会露馅（弹层出来了视图还在）。
+     * 系统菜单点不到，用 test:menu-pick 预置选择结果来验证整条链路。
+     */
+    await ipc(window, 'test:menu-pick', 'iphone-se')
     await window.locator('.preview-toolbar .ufc-select').click()
-    await window.waitForTimeout(500)
-    expect(await visible(window), '下拉展开时视图应隐藏').toBe(false)
-
-    // 藏起来之后要有静帧顶上，否则用户看到的是一片黑，以为预览崩了。
-    // 抓图必须在主进程里先于隐藏完成——拆成两次 IPC 的话隐藏先执行，截图必然失败
-    await window.waitForTimeout(1200)
-    const frozen = await window.evaluate(() => {
-      const img = document.querySelector('.screen-frozen') as HTMLImageElement | null
-      return img ? { w: img.naturalWidth, h: img.naturalHeight } : null
-    })
-    expect(frozen, '视图藏起时应有静帧占位').not.toBeNull()
-    expect(frozen!.w, '静帧应是真实画面而不是空图').toBeGreaterThan(100)
-
-    // 弹层不能顶出窗口
-    const popBox = await window.locator('.ufc-select-pop').boundingBox()
-    const vw = await window.evaluate(() => window.innerWidth)
-    expect(popBox!.x, '弹层不得越过窗口左边界').toBeGreaterThanOrEqual(0)
-    expect(Math.round(popBox!.x + popBox!.width), '弹层不得越过窗口右边界').toBeLessThanOrEqual(vw)
-
-    await window.keyboard.press('Escape')
-    await window.waitForTimeout(500)
-    expect(await visible(window), '下拉关闭后视图应恢复').toBe(true)
+    await window.waitForTimeout(2000)
+    const afterPick = await ipc<{ device: { width: number }; visible: boolean }>(window, 'test:preview-debug')
+    expect(afterPick.device.width, '菜单选中的设备应当生效').toBe(375)
+    await ipc(window, 'test:menu-pick', 'iphone-14-pro-max')
+    await window.locator('.preview-toolbar .ufc-select').click()
+    await window.waitForTimeout(2000)
+    expect(await visible(window), '菜单交互结束后视图应显示').toBe(true)
 
     // 2. 收起「模拟设备」整块
     await window.locator('.pv-head-toggle').click()
@@ -110,19 +102,16 @@ test('弹层展开、面板收起、离开工作台时，原生视图都要让�
     expect(await visible(window), '重新展开后视图应显示').toBe(true)
 
     // 3. 手动指定缩放：屏幕占位与主进程下发的 scale 都要照做
+    await ipc(window, 'test:menu-pick', '0.5')
     await window.locator('.zoom-select').click()
-    await window.waitForTimeout(400)
-    // 必须精确匹配：150% 也包含「50%」
-    await window.locator('.ufc-select-pop button', { hasText: /^50%$/ }).first().click()
     await window.waitForTimeout(1200)
     const zoomed = await ipc<{ fit: number; bounds: { width: number } }>(window, 'test:preview-debug')
     expect(zoomed.fit, '选了 50% 就该按 0.5 缩放').toBeCloseTo(0.5, 2)
     expect(zoomed.bounds.width, '视图宽度＝设备宽度 × 0.5').toBe(Math.round(430 * 0.5))
 
     // 100%：设备按真实尺寸呈现，装不下的部分裁掉，但不能溢出预览列
+    await ipc(window, 'test:menu-pick', '1')
     await window.locator('.zoom-select').click()
-    await window.waitForTimeout(400)
-    await window.locator('.ufc-select-pop button', { hasText: /^100%$/ }).first().click()
     await window.waitForTimeout(1200)
     const full = await ipc<{ fit: number; bounds: { x: number; y: number; width: number; height: number } }>(
       window,
@@ -181,18 +170,16 @@ test('弹层展开、面板收起、离开工作台时，原生视图都要让�
     // 100% 时宽度放得下（预览列比 430 宽），这一轴应当仍然居中
     expect(anchored.centeredX, '宽度够时应保持水平居中').toBeLessThanOrEqual(2)
 
+    await ipc(window, 'test:menu-pick', 'fit')
     await window.locator('.zoom-select').click()
-    await window.waitForTimeout(400)
-    await window.locator('.ufc-select-pop button', { hasText: '自适应' }).first().click()
     await window.waitForTimeout(1200)
     const fitted = await ipc<{ fit: number }>(window, 'test:preview-debug')
     expect(fitted.fit, '回到自适应后不再是 0.5').not.toBeCloseTo(0.5, 2)
 
     // 4. 换过设备再回项目列表——这里曾经留下一块浮在列表上的白色色块
+    await ipc(window, 'test:menu-pick', 'iphone-se')
     await window.locator('.preview-toolbar .ufc-select').click()
-    await window.waitForTimeout(400)
-    await window.locator('.ufc-select-pop button', { hasText: 'iPhone SE' }).click()
-    await window.waitForTimeout(1500)
+    await window.waitForTimeout(2000)
     await window.locator('.proj-trigger').click()
     await window.waitForTimeout(400)
     await window.locator('.proj-pop-list .to-list').click()

@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { CH } from '@shared/ipc-contract'
+import { invoke } from '../ipc'
 import Icon from './Icon'
 import './select.css'
 
@@ -17,8 +19,13 @@ interface Props {
   disabled?: boolean
   placeholder?: string
   className?: string
-  /** 弹层开合时通知外部。预览区要靠它临时隐藏原生视图，否则弹层会被盖住 */
-  onOpenChange?: (open: boolean) => void
+  /**
+   * 该下拉是否压在原生预览视图上。
+   *
+   * 是的话改用系统菜单：渲染进程画的弹层永远在 WebContentsView 之下，
+   * 靠隐藏视图让路既慢又会露馅（弹层出来了视图还在，被网页切掉一半）。
+   */
+  overlay?: boolean
 }
 
 /**
@@ -37,7 +44,7 @@ export default function Select({
   disabled,
   placeholder = '请选择',
   className,
-  onOpenChange,
+  overlay = false,
 }: Props) {
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(0)
@@ -52,8 +59,27 @@ export default function Select({
     if (disabled) return
     openRef.current = next
     setOpen(next)
-    onOpenChange?.(next)
     if (next) setActive(Math.max(0, options.findIndex((o) => o.value === value)))
+  }
+
+  /** 系统菜单版本：坐标取触发器左下角，与自绘弹层的落点一致 */
+  async function popupNative() {
+    if (disabled) return
+    const el = triggerRef.current
+    if (!el) return
+    const b = el.getBoundingClientRect()
+    setOpen(true)
+    try {
+      const r = await invoke(CH.uiPopupMenu, {
+        items: options.map((o) => ({ value: o.value, label: o.label, hint: o.hint })),
+        value,
+        x: b.left,
+        y: b.bottom + 2,
+      })
+      if (r.value !== null && r.value !== value) onChange(r.value)
+    } finally {
+      setOpen(false)
+    }
   }
 
   function pick(v: string) {
@@ -63,7 +89,7 @@ export default function Select({
 
   // 定位：优先向下展开，下方放不开就翻到上方
   useLayoutEffect(() => {
-    if (!open) return setRect(null)
+    if (!open || overlay) return setRect(null)
     const measure = () => {
       const el = triggerRef.current
       if (!el) return
@@ -88,7 +114,7 @@ export default function Select({
   }, [open, options.length])
 
   useEffect(() => {
-    if (!open) return
+    if (!open || overlay) return
     const onDown = (e: MouseEvent) => {
       const t = e.target as Node
       if (!triggerRef.current?.contains(t) && !popRef.current?.contains(t)) toggle(false)
@@ -113,14 +139,6 @@ export default function Select({
     }
   }, [open, active, options])
 
-  // 卸载时若弹层还开着，得补一次「已关闭」，否则外部（原生视图）会一直藏着。
-  // 但没开过就绝不通知——那会在离开页面时把该藏的东西又亮出来
-  useEffect(
-    () => () => {
-      if (openRef.current) onOpenChange?.(false)
-    },
-    []
-  )
 
   return (
     <>
@@ -128,7 +146,7 @@ export default function Select({
         ref={triggerRef}
         type="button"
         className={`ufc-select${open ? ' open' : ''} ${className ?? ''}`}
-        onClick={() => toggle(!open)}
+        onClick={() => (overlay ? void popupNative() : toggle(!open))}
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -139,6 +157,7 @@ export default function Select({
       </button>
 
       {open &&
+        !overlay &&
         rect &&
         createPortal(
           <div

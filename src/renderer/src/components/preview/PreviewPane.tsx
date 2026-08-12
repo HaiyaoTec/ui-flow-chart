@@ -237,7 +237,7 @@ export default function PreviewPane({
                 value: o.value,
                 label: o.value === 'fit' ? `自适应${zoomText ? ` ${zoomText}` : ''}` : o.label,
               }))}
-              onOpenChange={(o) => showView(!o && open && !suppressed, o)}
+              overlay
             />
           </>
         )}
@@ -254,8 +254,8 @@ export default function PreviewPane({
             label: d.name,
             hint: `${d.width}×${d.height}@${d.deviceScaleFactor}x`,
           }))}
-          // 自绘弹层是 HTML，原生视图永远画在它上面，展开期间先把视图藏起来
-          onOpenChange={(popped) => showView(!popped && open && !suppressed, popped)}
+          // 这两个下拉压在原生视图上，走系统菜单，不再需要藏视图
+          overlay
         />
         <input
           className="url"
