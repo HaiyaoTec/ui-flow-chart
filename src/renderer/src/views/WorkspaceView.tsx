@@ -6,6 +6,7 @@ import { useDialog } from '../components/Dialog'
 import Icon from '../components/Icon'
 import PreviewPane from '../components/preview/PreviewPane'
 import ProjectSwitcher from '../components/ProjectSwitcher'
+import Select from '../components/Select'
 import { invoke } from '../ipc'
 import { useApp } from '../state/store'
 import { STATE_LABEL } from './stateLabel'
@@ -114,20 +115,6 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
     }
   }
 
-  /** 导出菜单：走系统菜单，省得再维护一套定位与关闭逻辑 */
-  async function pickExport(e: React.MouseEvent<HTMLButtonElement>) {
-    const b = e.currentTarget.getBoundingClientRect()
-    const r = await invoke(CH.uiPopupMenu, {
-      items: [
-        { value: 'html', label: '导出 HTML', hint: '单文件，可直接分享' },
-        { value: 'png', label: '导出 PNG', hint: '整张画布截图' },
-      ],
-      x: b.left,
-      y: b.bottom + 2,
-    })
-    if (r.value === 'html' || r.value === 'png') await doExport(r.value)
-  }
-
   async function doExport(kind: 'html' | 'png') {
     setExporting(kind)
     try {
@@ -199,11 +186,18 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
           </button>
         )}
         {/* 导出是低频操作，两个并排的按钮太占位，收进一个菜单 */}
-        <button onClick={(e) => void pickExport(e)} disabled={Boolean(exporting)}>
-          <Icon name="exportHtml" />
-          {exporting ? '导出中…' : '导出'}
-          <Icon name="caretDown" size={14} />
-        </button>
+        <Select
+          className="export-select"
+          overlay
+          triggerLabel={exporting ? '导出中…' : '导出'}
+          value=""
+          disabled={Boolean(exporting)}
+          onChange={(v) => void doExport(v as 'html' | 'png')}
+          options={[
+            { value: 'html', label: '导出 HTML', hint: '单文件' },
+            { value: 'png', label: '导出 PNG', hint: '整张画布' },
+          ]}
+        />
       </div>
 
       {/* 预览没跟过来时必须说清楚：顶栏已经是新项目，右侧却还是另一个项目的页面 */}

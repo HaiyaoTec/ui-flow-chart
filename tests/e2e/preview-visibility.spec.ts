@@ -77,21 +77,25 @@ test('弹层展开、面板收起、离开工作台时，原生视图都要让�
     await window.waitForTimeout(1200)
 
     /*
-     * 1. 压在预览上的下拉走系统菜单。
+     * 1. 压在预览上的下拉：靠层级排序让路，不再隐藏视图。
      *
-     * 它由操作系统合成，天然在原生视图之上，因此不需要把视图藏起来——
-     * 先前靠隐藏让路的做法既慢（要先抓帧）又会露馅（弹层出来了视图还在）。
-     * 系统菜单点不到，用 test:menu-pick 预置选择结果来验证整条链路。
+     * 界面与网页同为窗口的子视图，展开弹层时把界面提到最上层即可。
+     * 视图始终是「可见」的，只是被界面盖住——这与隐藏有本质区别：
+     * 排序是瞬时的，不需要抓帧，也不会出现「弹层已出来、网页还压着」的半截状态。
      */
-    await ipc(window, 'test:menu-pick', 'iphone-se')
     await window.locator('.preview-toolbar .ufc-select').click()
+    await window.waitForTimeout(400)
+    await expect(window.locator('.ufc-select-pop'), '弹层应当渲染出来').toBeVisible()
+    expect(await visible(window), '弹层展开时不该再隐藏视图').toBe(true)
+    await window.locator('.ufc-select-pop button', { hasText: 'iPhone SE' }).click()
     await window.waitForTimeout(2000)
-    const afterPick = await ipc<{ device: { width: number }; visible: boolean }>(window, 'test:preview-debug')
-    expect(afterPick.device.width, '菜单选中的设备应当生效').toBe(375)
-    await ipc(window, 'test:menu-pick', 'iphone-14-pro-max')
+    const afterPick = await ipc<{ device: { width: number } }>(window, 'test:preview-debug')
+    expect(afterPick.device.width, '选中的设备应当生效').toBe(375)
+
     await window.locator('.preview-toolbar .ufc-select').click()
+    await window.waitForTimeout(400)
+    await window.locator('.ufc-select-pop button', { hasText: 'iPhone 14 Pro Max' }).click()
     await window.waitForTimeout(2000)
-    expect(await visible(window), '菜单交互结束后视图应显示').toBe(true)
 
     // 2. 收起「模拟设备」整块
     await window.locator('.pv-head-toggle').click()
@@ -102,16 +106,19 @@ test('弹层展开、面板收起、离开工作台时，原生视图都要让�
     expect(await visible(window), '重新展开后视图应显示').toBe(true)
 
     // 3. 手动指定缩放：屏幕占位与主进程下发的 scale 都要照做
-    await ipc(window, 'test:menu-pick', '0.5')
     await window.locator('.zoom-select').click()
+    await window.waitForTimeout(400)
+    // 必须精确匹配：150% 也包含「50%」
+    await window.locator('.ufc-select-pop button', { hasText: /^50%$/ }).first().click()
     await window.waitForTimeout(1200)
     const zoomed = await ipc<{ fit: number; bounds: { width: number } }>(window, 'test:preview-debug')
     expect(zoomed.fit, '选了 50% 就该按 0.5 缩放').toBeCloseTo(0.5, 2)
     expect(zoomed.bounds.width, '视图宽度＝设备宽度 × 0.5').toBe(Math.round(430 * 0.5))
 
     // 100%：设备按真实尺寸呈现，装不下的部分裁掉，但不能溢出预览列
-    await ipc(window, 'test:menu-pick', '1')
     await window.locator('.zoom-select').click()
+    await window.waitForTimeout(400)
+    await window.locator('.ufc-select-pop button', { hasText: /^100%$/ }).first().click()
     await window.waitForTimeout(1200)
     const full = await ipc<{ fit: number; bounds: { x: number; y: number; width: number; height: number } }>(
       window,
@@ -170,16 +177,18 @@ test('弹层展开、面板收起、离开工作台时，原生视图都要让�
     // 100% 时宽度放得下（预览列比 430 宽），这一轴应当仍然居中
     expect(anchored.centeredX, '宽度够时应保持水平居中').toBeLessThanOrEqual(2)
 
-    await ipc(window, 'test:menu-pick', 'fit')
     await window.locator('.zoom-select').click()
+    await window.waitForTimeout(400)
+    await window.locator('.ufc-select-pop button', { hasText: '自适应' }).first().click()
     await window.waitForTimeout(1200)
     const fitted = await ipc<{ fit: number }>(window, 'test:preview-debug')
     expect(fitted.fit, '回到自适应后不再是 0.5').not.toBeCloseTo(0.5, 2)
 
     // 4. 换过设备再回项目列表——这里曾经留下一块浮在列表上的白色色块
-    await ipc(window, 'test:menu-pick', 'iphone-se')
     await window.locator('.preview-toolbar .ufc-select').click()
-    await window.waitForTimeout(2000)
+    await window.waitForTimeout(400)
+    await window.locator('.ufc-select-pop button', { hasText: 'iPhone SE' }).click()
+    await window.waitForTimeout(1800)
     await window.locator('.proj-trigger').click()
     await window.waitForTimeout(400)
     await window.locator('.proj-pop-list .to-list').click()

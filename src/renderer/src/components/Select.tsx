@@ -22,10 +22,13 @@ interface Props {
   /**
    * 该下拉是否压在原生预览视图上。
    *
-   * 是的话改用系统菜单：渲染进程画的弹层永远在 WebContentsView 之下，
-   * 靠隐藏视图让路既慢又会露馅（弹层出来了视图还在，被网页切掉一半）。
+   * 是的话展开期间把界面视图提到最上层（见主进程 setStackFront）：
+   * 网页与界面同为窗口的子视图，谁在上由排序决定，纯排序切换是瞬时的，
+   * 不用隐藏预览、也不用抓帧顶替。
    */
   overlay?: boolean
+  /** 动作型菜单用：触发器固定显示这个文案，而不是当前选中项 */
+  triggerLabel?: string
 }
 
 /**
@@ -45,6 +48,7 @@ export default function Select({
   placeholder = '请选择',
   className,
   overlay = false,
+  triggerLabel,
 }: Props) {
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(0)
@@ -59,27 +63,9 @@ export default function Select({
     if (disabled) return
     openRef.current = next
     setOpen(next)
+    // 压在网页上的弹层：展开时把界面提到最上层，关闭后把预览放回去
+    if (overlay) void invoke(CH.uiStack, { front: next ? 'ui' : 'preview' })
     if (next) setActive(Math.max(0, options.findIndex((o) => o.value === value)))
-  }
-
-  /** 系统菜单版本：坐标取触发器左下角，与自绘弹层的落点一致 */
-  async function popupNative() {
-    if (disabled) return
-    const el = triggerRef.current
-    if (!el) return
-    const b = el.getBoundingClientRect()
-    setOpen(true)
-    try {
-      const r = await invoke(CH.uiPopupMenu, {
-        items: options.map((o) => ({ value: o.value, label: o.label, hint: o.hint })),
-        value,
-        x: b.left,
-        y: b.bottom + 2,
-      })
-      if (r.value !== null && r.value !== value) onChange(r.value)
-    } finally {
-      setOpen(false)
-    }
   }
 
   function pick(v: string) {
@@ -89,7 +75,7 @@ export default function Select({
 
   // 定位：优先向下展开，下方放不开就翻到上方
   useLayoutEffect(() => {
-    if (!open || overlay) return setRect(null)
+    if (!open) return setRect(null)
     const measure = () => {
       const el = triggerRef.current
       if (!el) return
@@ -114,7 +100,7 @@ export default function Select({
   }, [open, options.length])
 
   useEffect(() => {
-    if (!open || overlay) return
+    if (!open) return
     const onDown = (e: MouseEvent) => {
       const t = e.target as Node
       if (!triggerRef.current?.contains(t) && !popRef.current?.contains(t)) toggle(false)
@@ -146,18 +132,17 @@ export default function Select({
         ref={triggerRef}
         type="button"
         className={`ufc-select${open ? ' open' : ''} ${className ?? ''}`}
-        onClick={() => (overlay ? void popupNative() : toggle(!open))}
+        onClick={() => toggle(!open)}
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
       >
-        <span className="val">{current?.label ?? placeholder}</span>
-        {current?.hint && <span className="hint">{current.hint}</span>}
+        <span className="val">{triggerLabel ?? current?.label ?? placeholder}</span>
+        {!triggerLabel && current?.hint && <span className="hint">{current.hint}</span>}
         <Icon name="caretDown" size={15} className="caret" />
       </button>
 
       {open &&
-        !overlay &&
         rect &&
         createPortal(
           <div

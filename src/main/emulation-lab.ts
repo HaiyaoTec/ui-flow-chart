@@ -1,4 +1,4 @@
-import { app, session, WebContentsView, type BrowserWindow } from 'electron'
+import { app, session, WebContentsView, type BaseWindow } from 'electron'
 import { getDevice } from '@shared/devices'
 import type { DeviceSpec } from '@shared/types'
 import { delay } from './engine/PageDriver'
@@ -37,7 +37,7 @@ interface Report {
 
 const DEVICES = ['iphone-14-pro-max', 'pixel-7', 'desktop-1920', 'iphone-se']
 
-export async function runEmulationLab(win: BrowserWindow, baseUrl: string): Promise<void> {
+export async function runEmulationLab(win: BaseWindow, baseUrl: string): Promise<void> {
   const out: Report[] = []
   try {
     out.push(await runCase('A · 裸 CDP', win, baseUrl, 'cdp'))
@@ -51,7 +51,7 @@ export async function runEmulationLab(win: BrowserWindow, baseUrl: string): Prom
 
 async function runCase(
   name: string,
-  win: BrowserWindow,
+  win: BaseWindow,
   baseUrl: string,
   mode: 'cdp' | 'native'
 ): Promise<Report> {

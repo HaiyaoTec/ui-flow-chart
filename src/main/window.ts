@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { BrowserWindow, Menu, nativeTheme, shell } from 'electron'
+import { BaseWindow, Menu, nativeTheme, shell, WebContentsView, type WebContents } from 'electron'
 import { getSettings } from './store/settings'
 
 /**
@@ -14,11 +14,25 @@ export function themeBackground(): string {
   return dark ? '#0d0f14' : '#f4f5f8'
 }
 
-export function createMainWindow(): BrowserWindow {
+/**
+ * 主界面所在的视图。
+ *
+ * 用 BaseWindow + WebContentsView 而不是 BrowserWindow，是为了能自己排层级：
+ * BrowserWindow 的主内容永远在所有子视图之下，预览网页就必然压住界面自己的弹层；
+ * 两者都是子视图之后，谁在上由我们说了算——弹层展开时把界面提到最上层即可，
+ * 既不用隐藏预览，也不用抓帧顶替，切换是瞬时的。
+ */
+let uiView: WebContentsView | null = null
+
+export function getUiContents(): WebContents | null {
+  return uiView && !uiView.webContents.isDestroyed() ? uiView.webContents : null
+}
+
+export function createMainWindow(): BaseWindow {
   // 应用没有需要放进系统菜单的功能，File/Edit/View 这类默认菜单只是噪声
   Menu.setApplicationMenu(null)
 
-  const win = new BrowserWindow({
+  const win = new BaseWindow({
     width: 1560,
     height: 1000,
     minWidth: 1100,
@@ -26,6 +40,9 @@ export function createMainWindow(): BrowserWindow {
     show: false,
     backgroundColor: themeBackground(),
     title: 'UI Flow Chart',
+  })
+
+  const view = new WebContentsView({
     webPreferences: {
       // 工程是 ESM，electron-vite 会把 preload 产物命名为 .mjs
       preload: join(import.meta.dirname, '../preload/index.mjs'),
@@ -34,27 +51,43 @@ export function createMainWindow(): BrowserWindow {
       sandbox: false,
     },
   })
+  uiView = view
+  win.contentView.addChildView(view)
 
-  win.once('ready-to-show', () => win.show())
+  const fit = (): void => {
+    const [w, h] = win.getContentSize()
+    view.setBounds({ x: 0, y: 0, width: w, height: h })
+  }
+  fit()
+  win.on('resize', fit)
+
+  view.webContents.once('did-finish-load', () => win.show())
+
+  // 渲染进程里的外链走系统浏览器，不在应用内开窗
+  view.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:/.test(url)) void shell.openExternal(url)
+    return { action: 'deny' }
+  })
 
   // 跟随系统时，系统深浅色一变，窗口底色也要跟着换
   const syncBackground = (): void => {
     if (!win.isDestroyed()) win.setBackgroundColor(themeBackground())
   }
   nativeTheme.on('updated', syncBackground)
-  win.on('closed', () => nativeTheme.off('updated', syncBackground))
-
-  // 渲染进程里的外链走系统浏览器，不在应用内开窗
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:/.test(url)) void shell.openExternal(url)
-    return { action: 'deny' }
+  win.on('closed', () => {
+    nativeTheme.off('updated', syncBackground)
+    uiView = null
   })
 
   if (process.env.ELECTRON_RENDERER_URL) {
-    void win.loadURL(process.env.ELECTRON_RENDERER_URL)
+    void view.webContents.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
-    void win.loadFile(join(import.meta.dirname, '../renderer/index.html'))
+    void view.webContents.loadFile(join(import.meta.dirname, '../renderer/index.html'))
   }
 
   return win
+}
+
+export function getUiView(): WebContentsView | null {
+  return uiView
 }

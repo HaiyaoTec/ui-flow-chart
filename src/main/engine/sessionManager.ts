@@ -1,4 +1,4 @@
-import { Notification, type BrowserWindow } from 'electron'
+import { Notification, type BaseWindow } from 'electron'
 import { getDevice } from '@shared/devices'
 import { CH } from '@shared/ipc-contract'
 import {
@@ -13,18 +13,20 @@ import { createAiClient } from '../ai'
 import { getProject, partitionOf, touchProject, updateProjectRun } from '../store/projects'
 import { ExplorerSession } from './ExplorerSession'
 import { preview } from './previewManager'
+import { getUiContents } from '../window'
 
 /** 全局唯一的探索会话。同一时刻只允许一个项目在跑 */
 class SessionManager {
   private session: ExplorerSession | null = null
-  private win: BrowserWindow | null = null
+  private win: BaseWindow | null = null
 
-  bindWindow(win: BrowserWindow): void {
+  bindWindow(win: BaseWindow): void {
     this.win = win
   }
 
   private send(channel: string, payload: unknown): void {
-    if (this.win && !this.win.isDestroyed()) this.win.webContents.send(channel, payload)
+    // 界面自己也是一个 WebContentsView，事件要发给它而不是窗口
+    if (this.win && !this.win.isDestroyed()) getUiContents()?.send(channel, payload)
   }
 
   /**

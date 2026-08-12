@@ -1,4 +1,4 @@
-import { app, type BrowserWindow } from 'electron'
+import { app, type BaseWindow } from 'electron'
 import { getDevice } from '@shared/devices'
 import { delay } from './engine/PageDriver'
 import { preview } from './engine/previewManager'
@@ -8,7 +8,7 @@ import { preview } from './engine/previewManager'
  * 结果以 JSON 打到 stdout 后退出。
  *   UFC_SELFCHECK=http://localhost:4183 electron .
  */
-export async function runSelfCheck(win: BrowserWindow, baseUrl: string): Promise<void> {
+export async function runSelfCheck(win: BaseWindow, baseUrl: string): Promise<void> {
   const out: Record<string, unknown> = {}
   const fail = (k: string, e: unknown) => {
     out[k] = { error: e instanceof Error ? e.message : String(e) }

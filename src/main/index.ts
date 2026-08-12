@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { app, BrowserWindow, nativeTheme } from 'electron'
+import { app, BaseWindow, nativeTheme } from 'electron'
 import { registerIpc } from './ipc/registry'
 import { registerUfcProtocol, registerUfcSchemePrivileges } from './protocol'
 import { getSettings } from './store/settings'
@@ -21,7 +21,7 @@ const singleInstance = process.env.UFC_TEST === '1' || app.requestSingleInstance
 if (!singleInstance) {
   app.quit()
 } else {
-  let mainWindow: BrowserWindow | null = null
+  let mainWindow: BaseWindow | null = null
 
   app.on('second-instance', () => {
     if (mainWindow) {
@@ -59,7 +59,7 @@ if (!singleInstance) {
     }
 
     app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) mainWindow = createMainWindow()
+      if (BaseWindow.getAllWindows().length === 0) mainWindow = createMainWindow()
     })
   })
 

@@ -1,8 +1,9 @@
-import type { BrowserWindow } from 'electron'
+import type { BaseWindow } from 'electron'
 import { CH, type Bounds, type NavState, type PreviewDiagnosis } from '@shared/ipc-contract'
 import { getDevice } from '@shared/devices'
 import type { DeviceSpec } from '@shared/types'
 import { computeFitScale, PageDriver } from './PageDriver'
+import { getUiContents, getUiView } from '../window'
 
 /**
  * 预览视图的持有者。抓取与真机预览共用同一个 view——
@@ -10,7 +11,7 @@ import { computeFitScale, PageDriver } from './PageDriver'
  */
 export class PreviewManager {
   readonly driver = new PageDriver()
-  private win: BrowserWindow | null = null
+  private win: BaseWindow | null = null
   private device: DeviceSpec = getDevice('iphone-14-pro-max')
   private pane: Bounds = { x: 0, y: 0, width: 430, height: 932 }
   /** 渲染进程指定的缩放；null 表示按可用空间自适应 */
@@ -31,7 +32,7 @@ export class PreviewManager {
   /** 视口同步的串行队列 */
   private applyChain: Promise<void> = Promise.resolve()
 
-  bindWindow(win: BrowserWindow): void {
+  bindWindow(win: BaseWindow): void {
     this.win = win
     // 拖窗口边框时原生视图跟不上，右侧会拖出一条黑边。
     // 缩放期间先藏起来，等渲染进程报来新矩形再显示。
@@ -40,6 +41,21 @@ export class PreviewManager {
 
   getDevice(): DeviceSpec {
     return this.device
+  }
+
+  /**
+   * 界面与预览的层级切换。
+   *
+   * 界面自己也是窗口的子视图（见 window.ts），谁在上完全由排序决定。
+   * 自绘弹层要盖住网页时，把界面提到最上层就行——纯排序，瞬时生效，
+   * 不必隐藏预览、也不必抓帧顶替，切换缩放这类操作不会再被拖慢。
+   * 代价是界面在上时鼠标事件归界面，所以弹层一关就要把预览放回上层。
+   */
+  setStackFront(front: 'ui' | 'preview'): void {
+    const win = this.win
+    if (!win || win.isDestroyed()) return
+    const top = front === 'ui' ? getUiView() : this.driver.view
+    if (top) win.contentView.addChildView(top)
   }
 
   /** 打开目标站。每次都重建 view 并在导航前铺好 override */
@@ -340,7 +356,7 @@ export class PreviewManager {
       canGoBack: this.driver.canGoBack(),
       title: this.driver.title(),
     }
-    this.win.webContents.send(CH.evPreviewNav, state)
+    getUiContents()?.send(CH.evPreviewNav, state)
   }
 
   private handleCrash(): void {

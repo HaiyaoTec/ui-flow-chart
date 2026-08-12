@@ -43,7 +43,7 @@ export const CH = {
   previewNavigate: 'preview:navigate',
   previewProbe: 'preview:probe',
   previewDiagnose: 'preview:diagnose',
-  uiPopupMenu: 'ui:popup-menu',
+  uiStack: 'ui:stack',
 
   graphUpdateNode: 'graph:update-node',
   graphUpdateEdge: 'graph:update-edge',
@@ -144,16 +144,13 @@ export interface IpcInvokeMap {
   [CH.previewProbe]: { req: void; res: unknown }
   [CH.previewDiagnose]: { req: void; res: PreviewDiagnosis }
   /**
-   * 系统菜单形式的下拉。
+   * 界面与预览的层级切换。
    *
-   * 压在原生预览视图上的那几个下拉只能这么做：HTML 弹层永远在 WebContentsView
-   * 之下，靠隐藏视图让路既慢又容易露馅。系统菜单由操作系统合成，天然在最上层。
-   * 返回选中的 value，取消则为 null。
+   * 网页由 WebContentsView 绘制，与界面同为窗口的子视图；谁在上由排序决定。
+   * 自绘弹层要盖住预览时，把界面提到最上层即可——纯排序操作，瞬时生效，
+   * 既不用隐藏预览、也不用抓帧顶替。
    */
-  [CH.uiPopupMenu]: {
-    req: { items: Array<{ value: string; label: string; hint?: string }>; value?: string; x: number; y: number }
-    res: { value: string | null }
-  }
+  [CH.uiStack]: { req: { front: 'ui' | 'preview' }; res: void }
 
   [CH.graphUpdateNode]: { req: { id: string; patch: Record<string, unknown> }; res: void }
   [CH.graphUpdateEdge]: { req: { id: string; patch: Record<string, unknown> }; res: void }

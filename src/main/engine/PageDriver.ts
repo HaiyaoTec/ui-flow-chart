@@ -1,4 +1,4 @@
-import { nativeImage, session, WebContentsView, type BrowserWindow, type Debugger } from 'electron'
+import { nativeImage, session, WebContentsView, type BaseWindow, type Debugger } from 'electron'
 import type { DeviceSpec, ProbeResult } from '@shared/types'
 import { PROBE_SCRIPT, WAIT_IMAGES_SCRIPT } from './probeScript'
 import { signatureOf } from './signature'
@@ -40,8 +40,8 @@ export interface IPageDriver {
 const SCREENSHOT_WIDTH_FOR_AI = 645
 
 export class PageDriver implements IPageDriver {
-  private view: WebContentsView | null = null
-  private win: BrowserWindow | null = null
+  private rawView: WebContentsView | null = null
+  private win: BaseWindow | null = null
   private device: DeviceSpec | null = null
   /**
    * setDeviceMetricsOverride 的 scale。
@@ -58,17 +58,22 @@ export class PageDriver implements IPageDriver {
   private onCrash?: () => void
 
   get attached(): boolean {
-    return this.view !== null
+    return this.rawView !== null
+  }
+
+  /** 供层级排序使用：预览视图与界面视图同为窗口子视图，谁在上由排序决定 */
+  get view(): WebContentsView | null {
+    return this.rawView
   }
 
   private get dbg(): Debugger {
-    if (!this.view) throw new Error('预览视图尚未创建')
-    return this.view.webContents.debugger
+    if (!this.rawView) throw new Error('预览视图尚未创建')
+    return this.rawView.webContents.debugger
   }
 
   /* ------------------------------ 生命周期 ------------------------------ */
 
-  create(win: BrowserWindow, partition: string, device: DeviceSpec): void {
+  create(win: BaseWindow, partition: string, device: DeviceSpec): void {
     this.destroy()
     this.win = win
     this.device = device
@@ -88,7 +93,7 @@ export class PageDriver implements IPageDriver {
         webSecurity: true,
       },
     })
-    this.view = view
+    this.rawView = view
     win.contentView.addChildView(view)
     view.setBounds(this.bounds)
 
@@ -120,8 +125,8 @@ export class PageDriver implements IPageDriver {
    * 因此后续的 override 仍然早于目标站的首个请求。
    */
   async ensureRenderer(): Promise<void> {
-    if (!this.view) throw new Error('预览视图尚未创建')
-    const wc = this.view.webContents
+    if (!this.rawView) throw new Error('预览视图尚未创建')
+    const wc = this.rawView.webContents
     if (wc.getURL()) return
     try {
       await wc.loadURL('about:blank')
@@ -131,15 +136,15 @@ export class PageDriver implements IPageDriver {
   }
 
   destroy(): void {
-    if (!this.view) return
-    const wc = this.view.webContents
+    if (!this.rawView) return
+    const wc = this.rawView.webContents
     try {
       if (wc.debugger.isAttached()) wc.debugger.detach()
     } catch {
       /* 已断开则忽略 */
     }
     try {
-      this.win?.contentView.removeChildView(this.view)
+      this.win?.contentView.removeChildView(this.rawView)
     } catch {
       /* 窗口可能已销毁 */
     }
@@ -148,7 +153,7 @@ export class PageDriver implements IPageDriver {
     } catch {
       /* 忽略 */
     }
-    this.view = null
+    this.rawView = null
   }
 
   setCallbacks(cb: {
@@ -200,10 +205,10 @@ export class PageDriver implements IPageDriver {
 
   /** 应用全套 override。任何设备变更后都要重放一遍，再 reload */
   async applyDevice(device: DeviceSpec, fitScale: number): Promise<void> {
-    if (!this.view) return
+    if (!this.rawView) return
     this.device = device
     this.inputScale = fitScale
-    const wc = this.view.webContents
+    const wc = this.rawView.webContents
 
     // UA：CDP override 管文档与子资源；webContents/session 兜住 service worker 与预连接
     wc.setUserAgent(device.userAgent)
@@ -255,7 +260,7 @@ export class PageDriver implements IPageDriver {
 
   setBounds(b: Bounds): void {
     this.bounds = b
-    this.view?.setBounds(b)
+    this.rawView?.setBounds(b)
   }
 
   /** 当前实际下发给 CDP 的缩放，用于校验与视图尺寸是否一致 */
@@ -264,12 +269,12 @@ export class PageDriver implements IPageDriver {
   }
 
   currentBounds(): Bounds | null {
-    return this.view ? this.bounds : null
+    return this.rawView ? this.bounds : null
   }
 
   setVisible(visible: boolean): void {
     this.visible = visible
-    this.view?.setVisible(visible)
+    this.rawView?.setVisible(visible)
   }
 
   isVisible(): boolean {
@@ -317,7 +322,7 @@ export class PageDriver implements IPageDriver {
   /** 清空历史，避免 back() 回退到启动时用来拉起渲染进程的 about:blank */
   clearHistory(): void {
     try {
-      this.view?.webContents.navigationHistory.clear()
+      this.rawView?.webContents.navigationHistory.clear()
     } catch {
       /* 某些时机下不可用，忽略 */
     }
@@ -326,13 +331,13 @@ export class PageDriver implements IPageDriver {
   /* -------------------------------- 导航 -------------------------------- */
 
   async goto(url: string): Promise<void> {
-    if (!this.view) throw new Error('预览视图尚未创建')
-    await this.view.webContents.loadURL(url)
+    if (!this.rawView) throw new Error('预览视图尚未创建')
+    await this.rawView.webContents.loadURL(url)
     await this.settle()
   }
 
   async back(): Promise<void> {
-    const wc = this.view?.webContents
+    const wc = this.rawView?.webContents
     if (!wc) return
     if (wc.navigationHistory.canGoBack()) {
       wc.navigationHistory.goBack()
@@ -341,20 +346,20 @@ export class PageDriver implements IPageDriver {
   }
 
   async reload(): Promise<void> {
-    this.view?.webContents.reload()
+    this.rawView?.webContents.reload()
     await this.settle()
   }
 
   currentUrl(): string {
-    return this.view?.webContents.getURL() ?? ''
+    return this.rawView?.webContents.getURL() ?? ''
   }
 
   canGoBack(): boolean {
-    return this.view?.webContents.navigationHistory.canGoBack() ?? false
+    return this.rawView?.webContents.navigationHistory.canGoBack() ?? false
   }
 
   title(): string {
-    return this.view?.webContents.getTitle() ?? ''
+    return this.rawView?.webContents.getTitle() ?? ''
   }
 
   /* -------------------------- 探针与稳定帧等待 -------------------------- */
@@ -365,7 +370,7 @@ export class PageDriver implements IPageDriver {
 
   /** 等待渲染安静：加载结束 + 图片解码 + 固定延时 */
   async settle(extraMs = 900): Promise<void> {
-    const wc = this.view?.webContents
+    const wc = this.rawView?.webContents
     if (!wc) return
     if (wc.isLoading()) {
       await new Promise<void>((resolve) => {
@@ -410,7 +415,7 @@ export class PageDriver implements IPageDriver {
   /* -------------------------------- 截图 -------------------------------- */
 
   async screenshot(): Promise<Screenshot> {
-    if (!this.view || !this.device) throw new Error('预览视图尚未创建')
+    if (!this.rawView || !this.device) throw new Error('预览视图尚未创建')
 
     let png: Buffer
     try {
@@ -434,7 +439,7 @@ export class PageDriver implements IPageDriver {
       png = Buffer.from(res.data, 'base64')
     } catch {
       // 合成器偶尔出不了帧（导航中、窗口被遮挡等），退回 Electron 自带的抓图
-      const img = await this.view.webContents.capturePage()
+      const img = await this.rawView.webContents.capturePage()
       png = img.toPNG()
     }
 
@@ -545,8 +550,8 @@ export class PageDriver implements IPageDriver {
    * 没有超时的话整个探索循环会静默卡死在某一步。
    */
   async evalInPage(script: string, timeoutMs = 8000): Promise<unknown> {
-    if (!this.view) throw new Error('预览视图尚未创建')
-    const wc = this.view.webContents
+    if (!this.rawView) throw new Error('预览视图尚未创建')
+    const wc = this.rawView.webContents
     return Promise.race([
       wc.executeJavaScript(script, true),
       new Promise((_r, reject) => setTimeout(() => reject(new Error('页内脚本执行超时')), timeoutMs)),

@@ -10,8 +10,8 @@ import { ipc, launchApp } from './helpers'
 test('切换主题后窗口底色跟着换', async () => {
   const { app, window } = await launchApp()
   try {
-    const bg = () =>
-      app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.getBackgroundColor?.() ?? '')
+    // 主窗口是 BaseWindow（界面本身是它的一个 WebContentsView），不再是 BrowserWindow
+    const bg = () => app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows()[0]?.getBackgroundColor?.() ?? '')
 
     await ipc(window, 'theme:set', { theme: 'light' })
     await window.waitForTimeout(400)

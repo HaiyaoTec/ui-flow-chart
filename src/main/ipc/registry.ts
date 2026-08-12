@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { ipcMain, Menu, nativeTheme, shell, type BrowserWindow } from 'electron'
+import { ipcMain, nativeTheme, shell, type BaseWindow } from 'electron'
 import { CH, type IpcInvokeMap, type InvokeChannel } from '@shared/ipc-contract'
 import { getDevice } from '@shared/devices'
 import { SESSION_HOLDS_PREVIEW, type FlowGraph } from '@shared/types'
@@ -57,10 +57,7 @@ function withStore<T>(projectId: string, fn: (s: GraphStore) => T): T {
   return r
 }
 
-/** 测试模式下预置的菜单选择结果，见 test:menu-pick */
-let pendingMenuPick: string | null | undefined
-
-export function registerIpc(getWindow: () => BrowserWindow | null): void {
+export function registerIpc(getWindow: () => BaseWindow | null): void {
   const win = getWindow()
   if (win) {
     preview.bindWindow(win)
@@ -139,42 +136,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   handle(CH.previewDiagnose, () => preview.diagnose())
 
   /**
-   * 压在预览视图上的下拉走系统菜单。
+   * 界面与预览的层级切换。
    *
-   * 渲染进程画的弹层永远在 WebContentsView 之下；先前的做法是展开时把视图藏起来，
-   * 但抓帧与隐藏都要时间，弹层已经出来了视图还在，就会被网页切掉一半，操作也发涩。
-   * 菜单交给系统合成就没有这些问题，坐标用的是窗口内容区的 CSS 像素，与前端一致。
+   * 网页由 WebContentsView 绘制，界面自己也是一个 WebContentsView，谁在上由排序决定。
+   * 自绘弹层展开时把界面提到最上层即可——纯排序，瞬时生效；关闭后把预览放回去恢复交互。
    */
-  handle(CH.uiPopupMenu, ({ items, value, x, y }) => {
-    // 系统菜单是 OS 画的，自动化点不到。测试模式下可以预置一个返回值，
-    // 这样「点开下拉→选中→生效」这条链路仍然能被完整验证
-    if (process.env.UFC_TEST === '1' && pendingMenuPick !== undefined) {
-      const picked = pendingMenuPick
-      pendingMenuPick = undefined
-      return { value: picked }
-    }
-    const win = getWindow()
-    if (!win) return { value: null }
-    return new Promise<{ value: string | null }>((resolve) => {
-      let picked: string | null = null
-      const menu = Menu.buildFromTemplate(
-        items.map((it) => ({
-          label: it.hint ? `${it.label}   ${it.hint}` : it.label,
-          type: 'checkbox' as const,
-          checked: it.value === value,
-          click: () => {
-            picked = it.value
-          },
-        }))
-      )
-      menu.popup({
-        window: win,
-        x: Math.round(x),
-        y: Math.round(y),
-        callback: () => resolve({ value: picked }),
-      })
-    })
-  })
+  handle(CH.uiStack, ({ front }) => preview.setStackFront(front))
 
   /* --------------------------------- 图谱 --------------------------------- */
   handle(CH.graphUpdateNode, ({ id, patch }) => {
@@ -212,7 +179,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
  * 测试专用通道，只有设置 UFC_TEST=1 才注册。
  * 用于在自动化里读取预览页内部状态、模拟人工操作，生产运行时完全不存在。
  */
-function registerTestHooks(getWindow: () => BrowserWindow | null): void {
+function registerTestHooks(getWindow: () => BaseWindow | null): void {
   if (process.env.UFC_TEST !== '1') return
 
   ipcMain.handle('test:eval-preview', async (_e, script: string) =>
@@ -229,10 +196,6 @@ function registerTestHooks(getWindow: () => BrowserWindow | null): void {
     return { pngBytes: shot.png.length, jpegBase64Length: shot.jpegBase64.length }
   })
   ipcMain.handle('test:probe', async () => preview.driver.probe())
-  /** 预置下一次系统菜单的选择结果（null 表示取消） */
-  ipcMain.handle('test:menu-pick', async (_e, value: string | null) => {
-    pendingMenuPick = value
-  })
   ipcMain.handle('test:wait-stable', async () => preview.driver.waitStable())
   ipcMain.handle('test:graph', async (_e, projectId: string) => loadGraph(projectId))
   ipcMain.handle('test:preview-debug', async () => preview.debugInfo())

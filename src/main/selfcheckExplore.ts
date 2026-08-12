@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { app, type BrowserWindow } from 'electron'
+import { app, type BaseWindow } from 'electron'
 import type { FlowGraph, SessionSnapshot } from '@shared/types'
 import { delay } from './engine/PageDriver'
 import { preview } from './engine/previewManager'
@@ -13,7 +13,7 @@ import { join } from 'node:path'
  * 全流程自检：mock AI + 内置测试站，跑一整轮自动探索并打印图谱结果。
  *   UFC_SELFCHECK_EXPLORE=1 UFC_SITE=http://localhost:4183 UFC_AI=http://localhost:4190/v1
  */
-export async function runExploreCheck(win: BrowserWindow, site: string, aiBase: string): Promise<void> {
+export async function runExploreCheck(win: BaseWindow, site: string, aiBase: string): Promise<void> {
   const out: Record<string, unknown> = {}
   let projectId = ''
   // takeover 场景从登录页起步，会撞上验证码并转人工
