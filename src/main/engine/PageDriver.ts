@@ -94,8 +94,8 @@ export class PageDriver implements IPageDriver {
       },
     })
     this.rawView = view
-    // 视图默认透明底，尺寸变了而页面还没光栅化出来的那块会直接透出黑色。
-    // 这里是手机屏幕区，给黑底反而与设备一致，不会突兀
+    // 「视图已改尺寸、页面还没出帧」那块用这个颜色填充。
+    // 这里是手机屏幕区，黑色与关着的设备屏幕一致，不突兀
     view.setBackgroundColor('#000000')
     win.contentView.addChildView(view)
     view.setBounds(this.bounds)

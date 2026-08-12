@@ -47,10 +47,9 @@ export function createMainWindow(): BaseWindow {
   /**
    * 最底层的纯色底板。
    *
-   * BaseWindow 自己没有内容，setBackgroundColor 只是存了个值，没有图层去画它——
-   * 拖动边框时新露出的区域于是显出窗口的黑色底，这就是那条黑边。
-   * 垫一个不含 WebContents 的 View：它是纯色图层，由合成器直接画，没有「等渲染进程出帧」
-   * 这回事。尺寸给足冗余，拖拽期间不必跟着改，永远盖得住新露出的部分。
+   * 界面视图重建、或某一帧没能铺满时，这层保证露出来的是主题色而不是空白。
+   * 尺寸给足冗余，不必跟着窗口改。
+   * （注意：它挡不住拖拽缩放时的黑边——那是合成表面层面的问题，见下方 will-resize 处的说明。）
    */
   const back = new View()
   back.setBackgroundColor(themeBackground())
@@ -85,29 +84,22 @@ export function createMainWindow(): BaseWindow {
   fit()
 
   /**
-   * 拖拽窗口边框时不去改视图尺寸，松手后再一次性贴合。
+   * 尺寸跟随窗口。will-resize 给的是窗口外框，减掉边框与标题栏才是内容区，
+   * 赶在窗口真正改变之前下发，视图就不会慢一帧。
    *
-   * 黑边的来源是视图自己那块「还没光栅化出来」的表面：不管多早下发新尺寸，
-   * 渲染进程都要一两帧才画得出来，在那之前 Chromium 合成的就是黑色，
-   * View.setBackgroundColor 盖不住它（webContents.setBackgroundColor 在
-   * Electron 34 上并不存在，调了也是空操作）。
-   *
-   * 反过来想：只要视图不跟着变大，新露出的那条就还属于窗口本身，
-   * 画的是窗口底色——也就是当前主题的 --bg。于是拖拽过程中看到的是一条
-   * 主题色的留白，松手瞬间界面补齐；窗口变小时视图比窗口大，被裁掉，同样没有异常。
+   * 曾经为了绕开「拖拽时边缘露黑」在这里冻结过视图尺寸，那是误判：
+   * 黑边并非某一层没画，而是 Chromium 在 Windows 上的已知缺陷——
+   * DirectComposition 表面的 clip rect 先于像素扩张，露出的是表面里从未绘制过的区域，
+   * 黑色是它的初始化色（Electron 官方博客 "Improving Window Resize Behavior"）。
+   * 修复随 4 个 Chromium CL 进入 Electron 39.2.6，本工程已升到 39.8.10，
+   * 因此这里恢复正常的实时跟随。
    */
-  let resizing = false
-  win.on('will-resize', () => {
-    resizing = true
+  win.on('will-resize', (_e, next) => {
+    const outer = win.getBounds()
+    const inner = win.getContentBounds()
+    fit(next.width - (outer.width - inner.width), next.height - (outer.height - inner.height))
   })
-  win.on('resize', () => {
-    if (!resizing) fit()
-  })
-  win.on('resized', () => {
-    resizing = false
-    fit()
-  })
-  // 最大化/还原不是拖拽，系统会一次到位，直接贴合
+  win.on('resize', () => fit())
   win.on('maximize', () => fit())
   win.on('unmaximize', () => fit())
   win.on('enter-full-screen', () => fit())
@@ -147,11 +139,10 @@ export function getUiView(): WebContentsView | null {
 }
 
 /**
- * 界面视图自己的底色。
+ * 界面视图与底板的底色。
  *
- * 拖动窗口边框时，视图先被放大、渲染进程的新帧要晚一步才到，中间这块区域画的是
- * 视图的底色——不设的话就是黑的，表现为右侧/下方闪出一条黑边。
- * 窗口底色管不到这里：界面已经是覆盖在窗口上的子视图了。
+ * WebContentsView.setBackgroundColor 会一路落到 RenderWidgetHostViewAura 的图层背景色，
+ * 也就是「视图已放大、渲染进程还没出帧」那块的填充色。不设就是黑的。
  */
 export function applyViewBackground(): void {
   const color = themeBackground()
