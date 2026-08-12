@@ -67,12 +67,35 @@ export function createMainWindow(): BaseWindow {
     view.setBounds({ x: 0, y: 0, width: w, height: h })
   }
   fit()
-  win.on('will-resize', (_e, next) => {
-    const outer = win.getBounds()
-    const inner = win.getContentBounds()
-    fit(next.width - (outer.width - inner.width), next.height - (outer.height - inner.height))
+
+  /**
+   * 拖拽窗口边框时不去改视图尺寸，松手后再一次性贴合。
+   *
+   * 黑边的来源是视图自己那块「还没光栅化出来」的表面：不管多早下发新尺寸，
+   * 渲染进程都要一两帧才画得出来，在那之前 Chromium 合成的就是黑色，
+   * View.setBackgroundColor 盖不住它（webContents.setBackgroundColor 在
+   * Electron 34 上并不存在，调了也是空操作）。
+   *
+   * 反过来想：只要视图不跟着变大，新露出的那条就还属于窗口本身，
+   * 画的是窗口底色——也就是当前主题的 --bg。于是拖拽过程中看到的是一条
+   * 主题色的留白，松手瞬间界面补齐；窗口变小时视图比窗口大，被裁掉，同样没有异常。
+   */
+  let resizing = false
+  win.on('will-resize', () => {
+    resizing = true
   })
-  win.on('resize', () => fit())
+  win.on('resize', () => {
+    if (!resizing) fit()
+  })
+  win.on('resized', () => {
+    resizing = false
+    fit()
+  })
+  // 最大化/还原不是拖拽，系统会一次到位，直接贴合
+  win.on('maximize', () => fit())
+  win.on('unmaximize', () => fit())
+  win.on('enter-full-screen', () => fit())
+  win.on('leave-full-screen', () => fit())
 
   view.webContents.once('did-finish-load', () => win.show())
 
@@ -114,5 +137,12 @@ export function getUiView(): WebContentsView | null {
  * 窗口底色管不到这里：界面已经是覆盖在窗口上的子视图了。
  */
 export function applyViewBackground(): void {
-  uiView?.setBackgroundColor(themeBackground())
+  if (!uiView) return
+  const color = themeBackground()
+  // 两处都要设：View 的底色管「视图自己那块画布」，
+  // webContents 的底色管「页面还没光栅化出来的区域」——后者默认是透明的，
+  // 透出去就是窗口的黑色底板，正是拖边框时右侧/下方那条黑边
+  uiView.setBackgroundColor(color)
+  const wc = uiView.webContents as unknown as { setBackgroundColor?: (c: string) => void }
+  wc.setBackgroundColor?.(color)
 }

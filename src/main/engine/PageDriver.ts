@@ -94,6 +94,9 @@ export class PageDriver implements IPageDriver {
       },
     })
     this.rawView = view
+    // 视图默认透明底，尺寸变了而页面还没光栅化出来的那块会直接透出黑色。
+    // 这里是手机屏幕区，给黑底反而与设备一致，不会突兀
+    view.setBackgroundColor('#000000')
     win.contentView.addChildView(view)
     view.setBounds(this.bounds)
 
@@ -343,6 +346,16 @@ export class PageDriver implements IPageDriver {
       wc.navigationHistory.goBack()
       await this.settle()
     }
+  }
+
+  /**
+   * 强制整帧重绘。
+   *
+   * 视图尺寸变了但页面没重新绘制时，合成器会拿旧图块去铺满新尺寸——
+   * 表现就是同一屏内容在框里重复好几遍。换设备这类尺寸剧变之后补一刀最保险。
+   */
+  repaint(): void {
+    this.rawView?.webContents.invalidate()
   }
 
   async reload(): Promise<void> {

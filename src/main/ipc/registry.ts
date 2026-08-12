@@ -20,7 +20,7 @@ import {
   partitionOf,
 } from '../store/projects'
 import { getSettings, setSettings } from '../store/settings'
-import { applyViewBackground, themeBackground } from '../window'
+import { applyViewBackground, getUiView, themeBackground } from '../window'
 
 type Handler<C extends InvokeChannel> = (
   payload: IpcInvokeMap[C]['req']
@@ -200,6 +200,14 @@ function registerTestHooks(getWindow: () => BaseWindow | null): void {
   ipcMain.handle('test:wait-stable', async () => preview.driver.waitStable())
   ipcMain.handle('test:graph', async (_e, projectId: string) => loadGraph(projectId))
   ipcMain.handle('test:preview-debug', async () => preview.debugInfo())
+  /** 界面视图有没有铺满内容区——铺不满就会在边缘露出底色，看着像黑边 */
+  ipcMain.handle('test:ui-view-bounds', async () => {
+    const w = getWindow()
+    const v = getUiView()
+    if (!w || !v) return null
+    const [cw, ch] = w.getContentSize()
+    return { view: v.getBounds(), content: { width: cw, height: ch } }
+  })
   ipcMain.handle('test:resize-window', async (_e, d: { dw: number; dh: number }) => {
     const w = getWindow()
     if (!w) return null

@@ -29,6 +29,8 @@ export class PreviewManager {
    */
   private awaitingPane = false
   private awaitTimer: NodeJS.Timeout | null = null
+  /** 正在切换设备：这期间任何「新矩形到了」都不放行视图 */
+  private switching = false
   /** 视口同步的串行队列 */
   private applyChain: Promise<void> = Promise.resolve()
 
@@ -131,10 +133,20 @@ export class PreviewManager {
     this.device = device
     if (!this.driver.attached) return
     this.holdUntilPane()
-    // 换设备必须重放全部 override，即使缩放恰好没变
-    await this.syncViewport(true)
-    await this.driver.reload()
-    await this.verifyAndHeal().catch(() => null)
+    // 整个切换过程都不显示：中途渲染进程会报来新矩形，若那时就放出来，
+    // 页面还没按新视口重绘完，旧图块会被拿去铺满新尺寸
+    this.switching = true
+    try {
+      // 换设备必须重放全部 override，即使缩放恰好没变
+      await this.syncViewport(true)
+      await this.driver.reload()
+      await this.verifyAndHeal().catch(() => null)
+      // 重载完成后再同步一次，这时用的才是新设备对应的矩形
+      await this.syncViewport(true)
+    } finally {
+      this.switching = false
+      this.releasePane()
+    }
     this.emitNav()
   }
 
@@ -176,6 +188,8 @@ export class PreviewManager {
   }
 
   private releasePane(): void {
+    // 切换设备期间一律不放行，由 setDevice 收尾时统一放出来
+    if (this.switching) return
     if (!this.awaitingPane) return
     this.awaitingPane = false
     if (this.awaitTimer) {
