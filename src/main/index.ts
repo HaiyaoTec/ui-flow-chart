@@ -30,6 +30,12 @@ if (!singleInstance) {
     mainWindow = createMainWindow()
     registerIpc(() => mainWindow)
 
+    if (process.env.UFC_EMULAB) {
+      const { runEmulationLab } = await import('./emulation-lab')
+      await runEmulationLab(mainWindow, process.env.UFC_EMULAB)
+      return
+    }
+
     if (process.env.UFC_SELFCHECK) {
       const { runSelfCheck } = await import('./selfcheck')
       await runSelfCheck(mainWindow, process.env.UFC_SELFCHECK)

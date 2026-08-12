@@ -93,6 +93,9 @@ export class PreviewManager {
    *    表现就是「网站没识别到设备宽度」——PC 布局塞进手机框里。
    */
   async setPaneBounds(b: Bounds): Promise<void> {
+    // 明显不合理的矩形一律丢弃：渲染进程在布局未完成时可能报出极小值，
+    // 采信它会把原生视图摆到设备外框之外
+    if (b.width < 80 || b.height < 80) return
     this.pane = b
     if (!this.driver.attached || this.opening) return
     await this.syncViewport()

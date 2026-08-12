@@ -30,6 +30,10 @@ export default function DeviceFrame({ device, onScreenRect }: Props) {
   const measure = useCallback(() => {
     const box = boxRef.current
     if (!box) return
+    // 容器还没完成布局时 clientWidth/Height 是 0，此时算出来的是个假尺寸。
+    // 一旦把它上报出去，主进程就会把原生视图摆到错误的小矩形上，
+    // 表现为网页跑到设备外框之外。宁可先不报，等真实尺寸到位。
+    if (box.clientWidth < 80 || box.clientHeight < 80) return
     const chrome = CHROME[device.kind]
     const availW = Math.max(60, box.clientWidth - chrome.x)
     const availH = Math.max(60, box.clientHeight - chrome.y)
