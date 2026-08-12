@@ -73,6 +73,23 @@
   background: transparent;
 }
 
+/* 界面文字默认不可选：按钮、标签、状态这些拖一下就整片变蓝，很难看。
+   真正需要复制的内容（地址、日志、图谱里的文本）在下面单独开放。 */
+body {
+  user-select: none;
+}
+input,
+textarea,
+.mono,
+.ws-log,
+.preview-meta,
+.diag-grid,
+.pc-url,
+.dialog-msg,
+.ufc-selectable .ufc-card {
+  user-select: text;
+}
+
 html,
 body,
 #root {
@@ -219,28 +236,70 @@ label.field > .hint {
 
 .app {
   display: grid;
-  grid-template-columns: 210px 1fr;
+  grid-template-columns: auto 1fr;
   height: 100%;
 }
 
 .sidebar {
+  width: 210px;
   background: var(--panel);
   border-right: 1px solid var(--line);
   padding: 16px 12px;
   display: flex;
   flex-direction: column;
   gap: 4px;
+  transition: width 0.16s ease;
+}
+/* 收起态：只留图标，宽度刚好容纳一个按钮 */
+.sidebar.collapsed {
+  width: 56px;
+  padding: 16px 8px;
+}
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 14px;
 }
 .sidebar h1 {
   font-size: 15px;
-  margin: 0 0 16px 6px;
+  margin: 0 0 0 6px;
+  flex: 1;
+  min-width: 0;
   letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.nav-toggle {
+  flex: none;
+  padding: 6px;
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+}
+.nav-toggle:hover:not(:disabled) {
+  background: var(--panel-2);
+  color: var(--fg);
+}
+.sidebar.collapsed .sidebar-head {
+  justify-content: center;
 }
 .sidebar nav button {
   width: 100%;
   text-align: left;
   background: transparent;
   border-color: transparent;
+}
+/* 收起态的按钮只放一个图标，居中且不留文字位 */
+.sidebar.collapsed nav button,
+.sidebar.collapsed .theme-trigger {
+  justify-content: center;
+  padding: 8px 0;
+  gap: 0;
+}
+.sidebar.collapsed .sidebar-foot {
+  margin: 0 -8px -16px;
+  padding: 8px;
 }
 /* 选中态用低饱和的强调底 + 左侧色条，而不是整块高对比反色 */
 .sidebar nav button.active {

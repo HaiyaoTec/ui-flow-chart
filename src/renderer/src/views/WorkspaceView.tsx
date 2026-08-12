@@ -239,7 +239,7 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
         />
 
         <div className={`ws-side${logOpen ? (logCollapsed ? ' log-collapsed' : '') : ' log-hidden'}`}>
-          <PreviewPane initialUrl={project.targetUrl} deviceId={project.deviceId} />
+          <PreviewPane initialUrl={project.targetUrl} deviceId={project.deviceId} suppressed={dragging} />
 
           <div className="ws-log-panel">
             <button className="ws-log-head" onClick={() => setLogOpen((v) => !v)} title={logOpen ? '收起日志' : '展开日志'}>

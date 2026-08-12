@@ -27,8 +27,16 @@ test('弹层展开、面板收起、离开工作台时，原生视图都要让�
       goal: 'x',
     })
 
-    await openFirstProject(window)
-    await window.waitForTimeout(2000)
+    // 刚进项目、还没收到新矩形之前不能显示：否则会拿上一次的矩形先画一帧，
+    // 网页浮在画布上、位置还不对
+    await window.locator('.sidebar').getByRole('button', { name: /真机预览/ }).click()
+    await window.waitForTimeout(400)
+    await window.locator('.sidebar').getByRole('button', { name: /项目/ }).click()
+    await window.waitForTimeout(600)
+    await window.locator('.project-card').first().click()
+    // 「新矩形到达前不显示」是时序行为，直接断言会 flaky；
+    // 这里只守住结果：进来之后必须显示，且矩形是本次布局的（下面的断言会验证）
+    await window.waitForTimeout(2500)
     expect(await visible(window), '进入工作台后视图应显示').toBe(true)
 
     // 自适应下机身必须完整落在可用区内。装饰（状态栏、边框、home 条）都是按屏幕
@@ -42,6 +50,31 @@ test('弹层展开、面板收起、离开工作台时，原生视图都要让�
     expect(fitBox.top, '机身顶部不能超出容器').toBeGreaterThanOrEqual(0)
     expect(fitBox.bottom, '机身底部不能超出容器').toBeGreaterThanOrEqual(0)
     expect(fitBox.left, '机身左侧不能超出容器').toBeGreaterThanOrEqual(0)
+
+    // 窗口缩放期间视图会被藏起来（否则右侧拖出黑边），缩放结束后必须自己回来
+    await ipc(window, 'test:resize-window', { dw: 200, dh: 0 })
+    await window.waitForTimeout(1500)
+    expect(await visible(window), '窗口缩放结束后视图应恢复显示').toBe(true)
+    await ipc(window, 'test:resize-window', { dw: -200, dh: 0 })
+    await window.waitForTimeout(1200)
+
+    /*
+     * 尺寸必须收敛。
+     *
+     * 曾经把「是否裁切」接到了舞台内边距上：去掉留白 → 可用空间变大 → 机身放得下 →
+     * 不再算裁切 → 留白加回来 → 又放不下……在临界尺寸上会一直抖。
+     * 这里逐档改窗口宽度，每档都要求两次读数一致。
+     */
+    for (let i = 0; i < 8; i++) {
+      await ipc(window, 'test:resize-window', { dw: 7, dh: 0 })
+      await window.waitForTimeout(700)
+      const a = await ipc<{ pane: { width: number; height: number } }>(window, 'test:preview-debug')
+      await window.waitForTimeout(600)
+      const b = await ipc<{ pane: { width: number; height: number } }>(window, 'test:preview-debug')
+      expect(b.pane, `第 ${i + 1} 档窗口宽度下尺寸没有收敛`).toEqual(a.pane)
+    }
+    await ipc(window, 'test:resize-window', { dw: -56, dh: 0 })
+    await window.waitForTimeout(1200)
 
     // 1. 设备下拉：弹层是 HTML，展开期间视图必须藏起来
     await window.locator('.preview-toolbar .ufc-select').click()
@@ -97,6 +130,14 @@ test('弹层展开、面板收起、离开工作台时，原生视图都要让�
     )
     expect(full.bounds.height, '超出面板的部分应被裁掉').toBeLessThanOrEqual(Math.round(side!.height))
 
+    // 网页与机身必须在同一条线上截断，否则边框比网页多出一截，看着像没对齐
+    const cut = await window.evaluate(() => {
+      const box = document.querySelector('.device-box')!.getBoundingClientRect()
+      const screen = document.querySelector('.device-frame .screen')!.getBoundingClientRect()
+      return { visibleBottom: Math.round(Math.min(box.bottom, screen.bottom)) }
+    })
+    expect(Math.abs(full.bounds.y + full.bounds.height - cut.visibleBottom), '网页底边应与机身可见底边重合').toBeLessThanOrEqual(2)
+
     // 裁切时必须保留设备的顶部与左侧：屏幕占位区的左上角要在舞台内
     const anchored = await window.evaluate(() => {
       const f = document.querySelector('.device-frame')!.getBoundingClientRect()
@@ -109,6 +150,15 @@ test('弹层展开、面板收起、离开工作台时，原生视图都要让�
         centeredX: Math.abs(Math.round(f.left - stage.left) - Math.round(stage.right - f.right)),
       }
     })
+    // 机身外圈是画在轮廓之外的光晕，紧贴容器就会被切平，看着像顶部被削掉一块
+    const ringRoom = await window.evaluate(() => {
+      const f = document.querySelector('.device-frame') as HTMLElement
+      const box = document.querySelector('.device-box')!.getBoundingClientRect()
+      const ring = parseFloat(getComputedStyle(f).getPropertyValue('--ring')) || 0
+      return { gap: Math.round(f.getBoundingClientRect().top - box.top), ring: Math.round(ring) }
+    })
+    expect(ringRoom.gap, '顶部要给外圈光晕留出位置，否则机身顶被切平').toBeGreaterThanOrEqual(ringRoom.ring)
+
     expect(anchored.dx, '设备左侧不能被切到舞台外').toBeGreaterThanOrEqual(0)
     expect(anchored.dy, '设备顶部不能被切到舞台外').toBeGreaterThanOrEqual(0)
     // 100% 时宽度放得下（预览列比 430 宽），这一轴应当仍然居中

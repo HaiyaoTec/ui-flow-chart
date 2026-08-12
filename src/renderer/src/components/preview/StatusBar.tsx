@@ -34,7 +34,7 @@ export default function StatusBar({ width, height, radius, islandW, islandH }: P
       className="status-bar"
       style={{ width, height, borderRadius: `${radius}px ${radius}px 0 0`, paddingInline: Math.round(width * 0.07) }}
     >
-      <span className="sb-time" style={{ fontSize: Math.round(height * 0.34) }}>
+      <span className="sb-time" style={{ fontSize: Math.round(height * 0.27) }}>
         {time}
       </span>
 

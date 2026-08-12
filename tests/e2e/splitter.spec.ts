@@ -53,8 +53,14 @@ test('拖动分栏调整占比，两侧最小宽度不被突破', async () => {
     await window.mouse.move(box.x + box.width / 2, cy)
     await window.mouse.down()
     await window.mouse.move(box.x + box.width / 2 - 200, cy, { steps: 12 })
+    // 拖动过程中原生视图必须先藏起来：它的位置要经 IPC 才更新，
+    // 中途会带着旧宽度停留几帧，看起来就是网页压到了左边的画布上
+    const during = await ipc<{ visible: boolean }>(window, 'test:preview-debug')
+    expect(during.visible, '拖动分栏时视图应暂时隐藏').toBe(false)
     await window.mouse.up()
     await window.waitForTimeout(500)
+    const after = await ipc<{ visible: boolean }>(window, 'test:preview-debug')
+    expect(after.visible, '松开后视图应恢复显示').toBe(true)
 
     const wider = await widths()
     expect(wider.preview, '预览应变宽').toBeGreaterThan(before.preview)

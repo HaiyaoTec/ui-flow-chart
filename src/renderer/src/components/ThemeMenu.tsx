@@ -20,7 +20,7 @@ const OPTIONS: Array<{ value: Theme; label: string; icon: IconName }> = [
  * prefers-color-scheme 会跟着变。这里只负责把系统当前的深浅态
  * 映射到 data-theme，以及让用户选。
  */
-export default function ThemeMenu() {
+export default function ThemeMenu({ compact = false }: { compact?: boolean }) {
   const [theme, setTheme] = useState<Theme>('system')
   const [open, setOpen] = useState(false)
   const boxRef = useRef<HTMLDivElement>(null)
@@ -71,10 +71,21 @@ export default function ThemeMenu() {
 
   return (
     <div className="theme-menu" ref={boxRef}>
-      <button className="theme-trigger" onClick={() => setOpen((v) => !v)} aria-haspopup="menu" aria-expanded={open}>
+      {/* 收起态只留图标，标签退到 title */}
+      <button
+        className="theme-trigger"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={`主题：${current.label}`}
+      >
         <Icon name={current.icon} />
-        <span className="grow">{current.label}</span>
-        <span className="caret">›</span>
+        {!compact && (
+          <>
+            <span className="grow">{current.label}</span>
+            <span className="caret">›</span>
+          </>
+        )}
       </button>
 
       {open && (

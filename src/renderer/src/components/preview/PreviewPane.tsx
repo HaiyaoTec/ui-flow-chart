@@ -22,10 +22,17 @@ interface Props {
   initialUrl?: string
   /** 项目指定的设备。工作台里预览归项目所有，下拉框要显示项目真正在用的那台 */
   deviceId?: string
+  /** 外部要求暂时藏起原生视图（例如正在拖动分栏） */
+  suppressed?: boolean
   onDeviceChange?: (deviceId: string) => void
 }
 
-export default function PreviewPane({ initialUrl = '', deviceId: boundDeviceId, onDeviceChange }: Props) {
+export default function PreviewPane({
+  initialUrl = '',
+  deviceId: boundDeviceId,
+  suppressed = false,
+  onDeviceChange,
+}: Props) {
   const [deviceId, setDeviceId] = useState(boundDeviceId ?? DEVICE_PRESETS[0].id)
   const [url, setUrl] = useState(initialUrl)
   const [editingUrl, setEditingUrl] = useState(false)
@@ -41,6 +48,13 @@ export default function PreviewPane({ initialUrl = '', deviceId: boundDeviceId, 
   const [shownWidth, setShownWidth] = useState(0)
   /** 机身是否被裁切 */
   const [cropped, setCropped] = useState(false)
+  /** 催促 DeviceFrame 重报矩形的计数器 */
+  const [reportNonce, setReportNonce] = useState(0)
+  /** 原生视图当前是否被藏起来（藏起时屏幕区要给句说明，否则纯黑像是坏了） */
+  const [viewHidden, setViewHidden] = useState(false)
+  const [switching, setSwitching] = useState(false)
+  /** 视图藏起时顶上的静帧 */
+  const [frozen, setFrozen] = useState('')
   const device = getDevice(deviceId)
   const lastRect = useRef('')
   const alive = useRef(true)
@@ -48,7 +62,16 @@ export default function PreviewPane({ initialUrl = '', deviceId: boundDeviceId, 
   const deviceIdRef = useRef(deviceId)
   deviceIdRef.current = deviceId
 
-  useEffect(() => on(CH.evPreviewNav, setNav), [])
+  useEffect(
+    () =>
+      on(CH.evPreviewNav, (s) => {
+        setNav(s)
+        // 主进程刚重建过视图，它在等新矩形才肯显示。矩形可能一模一样、不会自然重报，
+        // 这里主动催一次，免得白等兜底超时
+        setReportNonce((n) => n + 1)
+      }),
+    []
+  )
 
   /**
    * 地址栏跟随真实导航状态，与浏览器一致。
@@ -73,12 +96,21 @@ export default function PreviewPane({ initialUrl = '', deviceId: boundDeviceId, 
   // 只在清理里置 false 的话，第二次挂载后守卫永远是关的，视图再也藏不掉
   useEffect(() => {
     alive.current = true
-    void invoke(CH.previewSetVisible, { visible: true })
     return () => {
       alive.current = false
       void invoke(CH.previewSetVisible, { visible: false })
     }
   }, [])
+
+  /**
+   * 可见性只有一个出口：本区块展开、且外部没有要求暂时藏起来。
+   *
+   * 拖动分栏时必须藏：原生视图的位置要经 IPC 才更新，拖动过程中它会带着旧的
+   * 宽度停留几帧，看起来就是网页越界压到了左边的画布上。
+   */
+  useEffect(() => {
+    showView(open && !suppressed)
+  }, [open, suppressed])
 
   /**
    * 卸载后不许再改原生视图的可见性。
@@ -88,8 +120,22 @@ export default function PreviewPane({ initialUrl = '', deviceId: boundDeviceId, 
    * 子组件那次"关闭弹层"的回调会在本组件收尾之后才到，
    * 把已经藏好的视图又亮出来——表现就是项目列表上多出一块白色色块。
    */
+  /**
+   * 切换原生视图的可见性。
+   *
+   * 藏起来之前先抓一张静帧顶上：视图一藏，露出的就是设备的黑屏底色，
+   * 看着像预览崩了。有了静帧，观感是「画面定住」，弹层关掉又接着动。
+   */
   const showView = (visible: boolean) => {
     if (!alive.current) return
+    if (!visible) {
+      void invoke(CH.previewSnapshot)
+        .then((r) => alive.current && setFrozen(r.image))
+        .catch(() => undefined)
+    } else {
+      setFrozen('')
+    }
+    setViewHidden(!visible)
     void invoke(CH.previewSetVisible, { visible })
   }
 
@@ -111,11 +157,10 @@ export default function PreviewPane({ initialUrl = '', deviceId: boundDeviceId, 
     localStorage.setItem('ufc.previewZoom', v)
   }
 
-  /** 收起后原生视图必须一起藏起来，否则它会浮在下面的日志上 */
+  /** 收起后原生视图必须一起藏起来，否则它会浮在下面的日志上（由上面的 effect 统一处理） */
   function toggleOpen(next: boolean) {
     setOpen(next)
     localStorage.setItem('ufc.previewOpen', next ? '1' : '0')
-    showView(next)
   }
 
   async function go() {
@@ -155,14 +200,22 @@ export default function PreviewPane({ initialUrl = '', deviceId: boundDeviceId, 
   const actual = shownWidth > 0 ? shownWidth / device.width : 0
   const zoomText = actual > 0 ? `${Math.round(actual * 100)}%` : ''
 
+  /**
+   * 换设备要重放全部 override 并重新加载，中间页面必然是空的。
+   * 与其让用户盯着一片纯黑，不如先把视图藏起来、给句说明，加载完再显示。
+   */
   async function changeDevice(id: string) {
     setDeviceId(id)
     onDeviceChange?.(id)
     setBusy(true)
+    setSwitching(true)
+    showView(false)
     try {
       await invoke(CH.previewSetDevice, { deviceId: id })
     } finally {
       setBusy(false)
+      setSwitching(false)
+      showView(open && !suppressed)
     }
   }
 
@@ -184,7 +237,7 @@ export default function PreviewPane({ initialUrl = '', deviceId: boundDeviceId, 
                 value: o.value,
                 label: o.value === 'fit' ? `自适应${zoomText ? ` ${zoomText}` : ''}` : o.label,
               }))}
-              onOpenChange={(o) => showView(!o)}
+              onOpenChange={(o) => showView(!o && open && !suppressed)}
             />
           </>
         )}
@@ -202,7 +255,7 @@ export default function PreviewPane({ initialUrl = '', deviceId: boundDeviceId, 
             hint: `${d.width}×${d.height}@${d.deviceScaleFactor}x`,
           }))}
           // 自绘弹层是 HTML，原生视图永远画在它上面，展开期间先把视图藏起来
-          onOpenChange={(open) => showView(!open)}
+          onOpenChange={(popped) => showView(!popped && open && !suppressed)}
         />
         <input
           className="url"
@@ -229,9 +282,17 @@ export default function PreviewPane({ initialUrl = '', deviceId: boundDeviceId, 
         </button>
       </div>
 
-      {/* 裁切时收掉舞台留白，把每一像素都让给设备 */}
-      <div className={`preview-stage${cropped ? ' cropped' : ''}`}>
-        <DeviceFrame device={device} zoom={zoom} onScreenRect={onScreenRect} onOverflowChange={setCropped} />
+      {/* 裁切状态只用于不参与布局的表现，不能反过来改变可用空间 */}
+      <div className="preview-stage">
+        <DeviceFrame
+          device={device}
+          zoom={zoom}
+          onScreenRect={onScreenRect}
+          onOverflowChange={setCropped}
+          reportNonce={reportNonce}
+          frozen={viewHidden ? frozen : ''}
+          hint={viewHidden && !frozen ? (switching ? '正在切换设备…' : '预览已暂时隐藏') : ''}
+        />
       </div>
 
       <div className={`preview-meta${cropped ? ' cropped' : ''}`}>

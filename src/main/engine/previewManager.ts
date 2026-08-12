@@ -18,11 +18,24 @@ export class PreviewManager {
   private partition = 'persist:preview-default'
   private lastUrl = ''
   private opening = false
+  /** 渲染进程希望的可见性 */
+  private wantVisible = true
+  /**
+   * 打开新目标后，在拿到渲染进程上报的新矩形之前不显示视图。
+   *
+   * 否则会拿上一次的矩形先画一帧——进项目时就表现为网页突然浮在画布上、
+   * 位置也不对，几百毫秒后才归位。
+   */
+  private awaitingPane = false
+  private awaitTimer: NodeJS.Timeout | null = null
   /** 视口同步的串行队列 */
   private applyChain: Promise<void> = Promise.resolve()
 
   bindWindow(win: BrowserWindow): void {
     this.win = win
+    // 拖窗口边框时原生视图跟不上，右侧会拖出一条黑边。
+    // 缩放期间先藏起来，等渲染进程报来新矩形再显示。
+    win.on('resize', () => this.holdUntilPane())
   }
 
   getDevice(): DeviceSpec {
@@ -43,9 +56,12 @@ export class PreviewManager {
     const fit = this.scaleFor(paneAtOpen)
     const trace = (s: string) => process.env.UFC_TRACE === '1' && console.log(`[preview] ${s}`)
 
+    this.holdUntilPane()
+
     try {
       trace('create view')
       this.driver.create(this.win, partition, device)
+      this.driver.setVisible(false)
       this.driver.setCallbacks({
         onNav: () => this.emitNav(),
         // 跨进程导航可能换掉渲染帧，覆盖要整套重放，不能只挪视图
@@ -71,8 +87,10 @@ export class PreviewManager {
     // 首次落地后核对一次：模拟没生效就自己纠正，别让用户看着 PC 布局发懵
     const heal = await this.verifyAndHeal().catch(() => null)
     if (heal?.healed) trace(`设备模拟未生效（scrollWidth=${heal.scrollWidth}），已重放并重载`)
-    // 打开期间挡掉的 bounds 上报，这里补一次
-    await this.setPaneBounds(this.pane)
+    // 打开期间挡掉的 bounds 上报，这里补一次。
+    // 注意走内部同步而不是 setPaneBounds——那会把「等待新矩形」的标记
+    // 用旧矩形提前解除，视图又会在错误的位置闪一下
+    await this.syncViewport(true)
     this.emitNav()
   }
 
@@ -105,6 +123,32 @@ export class PreviewManager {
     this.paneScale = typeof b.scale === 'number' && b.scale > 0 ? b.scale : null
     if (!this.driver.attached || this.opening) return
     await this.syncViewport()
+    // 新矩形已经落到视图上，这时候再显示才不会闪现在旧位置
+    this.releasePane()
+  }
+
+  /**
+   * 暂时藏起视图，直到渲染进程报来新的矩形。
+   *
+   * 用在两处：打开新目标（否则会拿上一次的矩形先画一帧），
+   * 以及窗口缩放（原生视图跟不上窗口边框，右侧会拖出一条黑边）。
+   */
+  private holdUntilPane(): void {
+    this.awaitingPane = true
+    this.driver.setVisible(false)
+    if (this.awaitTimer) clearTimeout(this.awaitTimer)
+    // 兜底：万一渲染进程没有上报（页面没挂载预览面板），不能让视图永远藏着
+    this.awaitTimer = setTimeout(() => this.releasePane(), 2500)
+  }
+
+  private releasePane(): void {
+    if (!this.awaitingPane) return
+    this.awaitingPane = false
+    if (this.awaitTimer) {
+      clearTimeout(this.awaitTimer)
+      this.awaitTimer = null
+    }
+    this.driver.setVisible(this.wantVisible)
   }
 
   /** 当前应当使用的缩放：渲染进程指定优先，否则按可用空间自适应 */
@@ -133,7 +177,9 @@ export class PreviewManager {
   }
 
   setVisible(visible: boolean): void {
-    this.driver.setVisible(visible)
+    this.wantVisible = visible
+    // 等待新矩形期间只记意愿，不真的显示——否则又会在旧位置画一帧
+    this.driver.setVisible(visible && !this.awaitingPane)
   }
 
   /**

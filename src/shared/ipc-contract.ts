@@ -43,6 +43,7 @@ export const CH = {
   previewNavigate: 'preview:navigate',
   previewProbe: 'preview:probe',
   previewDiagnose: 'preview:diagnose',
+  previewSnapshot: 'preview:snapshot',
 
   graphUpdateNode: 'graph:update-node',
   graphUpdateEdge: 'graph:update-edge',
@@ -137,6 +138,8 @@ export interface IpcInvokeMap {
   [CH.previewNavigate]: { req: { url?: string; action?: 'back' | 'reload' }; res: void }
   [CH.previewProbe]: { req: void; res: unknown }
   [CH.previewDiagnose]: { req: void; res: PreviewDiagnosis }
+  /** 取当前画面的静帧，用于视图被临时藏起时占位（data URI，取不到时为空串） */
+  [CH.previewSnapshot]: { req: void; res: { image: string } }
 
   [CH.graphUpdateNode]: { req: { id: string; patch: Record<string, unknown> }; res: void }
   [CH.graphUpdateEdge]: { req: { id: string; patch: Record<string, unknown> }; res: void }

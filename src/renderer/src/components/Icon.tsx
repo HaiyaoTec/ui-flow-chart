@@ -15,6 +15,8 @@ import {
   List,
   Monitor,
   Moon,
+  PanelLeftClose,
+  PanelLeftOpen,
   Pause,
   Pencil,
   Play,
@@ -69,6 +71,8 @@ const ICONS = {
   caretDown: ChevronDown,
   caretRight: ChevronRight,
   caretUp: ChevronUp,
+  collapse: PanelLeftClose,
+  expand: PanelLeftOpen,
   add: Plus,
   edit: Pencil,
 } satisfies Record<string, LucideIcon>

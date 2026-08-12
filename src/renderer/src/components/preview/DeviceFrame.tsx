@@ -8,6 +8,17 @@ interface Props {
   zoom?: 'fit' | number
   /** 机身是否被裁切，用于上层调整周边留白与边缘处理 */
   onOverflowChange?: (overflow: boolean) => void
+  /**
+   * 变一下这个值就强制重报一次矩形。
+   *
+   * 矩形没变时是不会重复上报的，可主进程重建视图后正等着新矩形才肯显示，
+   * 尺寸恰好没变的话就只能干等兜底超时——预览会空白两秒多。
+   */
+  reportNonce?: number
+  /** 网页被临时藏起时显示在屏幕区的说明，避免一片纯黑看着像坏了 */
+  hint?: string
+  /** 视图藏起时顶上的静帧（data URI）。有它就不必显示说明文字 */
+  frozen?: string
   /** 屏幕占位区的可见矩形变化时回调，主进程据此摆放 WebContentsView */
   onScreenRect: (rect: { x: number; y: number; width: number; height: number; scale: number }) => void
 }
@@ -70,7 +81,15 @@ function frameMetrics(kind: 'mobile' | 'tablet' | 'desktop', w: number) {
  * 屏幕尺寸用 JS 按可用空间与设备宽高比算出来，不靠 CSS aspect-ratio：
  * 嵌套 flex 里 aspect-ratio 的解析结果不稳定，实测会被拉成容器宽度。
  */
-export default function DeviceFrame({ device, zoom = 'fit', onScreenRect, onOverflowChange }: Props) {
+export default function DeviceFrame({
+  device,
+  zoom = 'fit',
+  onScreenRect,
+  onOverflowChange,
+  reportNonce = 0,
+  hint = '',
+  frozen = '',
+}: Props) {
   const boxRef = useRef<HTMLDivElement>(null)
   const screenRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ width: 0, height: 0 })
@@ -146,13 +165,15 @@ export default function DeviceFrame({ device, zoom = 'fit', onScreenRect, onOver
     const report = () => {
       const r = el.getBoundingClientRect()
       if (r.width < 80 || r.height < 80) return
-      // 与舞台可见区求交：指定倍数时设备框可能比面板大，直接上报会让原生视图
-      // 盖到画布和日志上。裁掉的部分就是看不见的部分，缩放本身不受影响。
-      const stage = boxRef.current?.parentElement?.getBoundingClientRect()
-      const left = Math.max(r.left, stage?.left ?? r.left)
-      const top = Math.max(r.top, stage?.top ?? r.top)
-      const right = Math.min(r.right, stage?.right ?? r.right)
-      const bottom = Math.min(r.bottom, stage?.bottom ?? r.bottom)
+      // 与 device-box 求交：指定倍数时设备框可能比面板大，直接上报会让原生视图
+      // 盖到画布和日志上。求交的对象必须正是裁掉机身的那个容器（device-box，
+      // 它是 overflow:hidden 的），换成外层舞台的话网页与机身边框会在不同的位置
+      // 截断，看着就是「网页和边框没对齐」。
+      const clip = boxRef.current?.getBoundingClientRect()
+      const left = Math.max(r.left, clip?.left ?? r.left)
+      const top = Math.max(r.top, clip?.top ?? r.top)
+      const right = Math.min(r.right, clip?.right ?? r.right)
+      const bottom = Math.min(r.bottom, clip?.bottom ?? r.bottom)
       const rect = {
         x: Math.round(left),
         y: Math.round(top),
@@ -180,7 +201,7 @@ export default function DeviceFrame({ device, zoom = 'fit', onScreenRect, onOver
       window.removeEventListener('resize', report)
       window.clearInterval(timer)
     }
-  }, [size, onScreenRect, device.id])
+  }, [size, onScreenRect, device.id, reportNonce])
 
   // 外框的圆角、边框、装饰都按屏幕实际显示宽度等比缩放。
   // 写死 46px 圆角的话，预览一缩小手机就被「啃」成了圆角矩形。
@@ -233,7 +254,10 @@ export default function DeviceFrame({ device, zoom = 'fit', onScreenRect, onOver
             <span className="dot g" />
           </div>
         )}
-        <div className="screen" ref={screenRef} style={{ width: size.width, height: size.height }} />
+        <div className="screen" ref={screenRef} style={{ width: size.width, height: size.height }}>
+          {frozen && <img className="screen-frozen" src={frozen} alt="" draggable={false} />}
+          {hint && <span className="screen-hint">{hint}</span>}
+        </div>
         {isPhone && <div className="home-bar" />}
       </div>
     </div>

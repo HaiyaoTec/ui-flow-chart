@@ -116,10 +116,10 @@
   background-size: 22px 22px;
   overflow: hidden;
 }
-/* 机身已经放不下时，这点留白只会再挤掉几十像素的可视内容 */
-.preview-stage.cropped {
-  padding: 0;
-}
+/* 注意：这里绝不能按「是否裁切」改动内边距。
+   改了就成了反馈环——去掉留白后可用空间变大、机身又放得下、于是不再算裁切、
+   留白加回来、又放不下……在临界尺寸上会持续抖动。
+   裁切状态只允许影响不参与布局的表现（例如信息栏的投影）。 */
 
 /* 量可用空间用的容器，尺寸计算全在 JS 里做。
    必须显式纵向撑满：父级是 align-items:center 的 flex，
@@ -135,12 +135,22 @@
   overflow: hidden;
 }
 /* 放得下的方向保持居中；放不下的方向靠起点，
-   把最该看见的顶部与左侧留在可视区内 */
+   把最该看见的顶部与左侧留在可视区内。
+   外圈光晕是画在机身之外的 box-shadow，紧贴容器边就会被 overflow 切掉，
+   看着像机身顶部被削平了，所以靠边时用外边距把它让出来。
+   用 margin 而不是容器 padding：margin 不改变 clientHeight，
+   不会与「是否溢出」的判定形成反馈环 */
 .device-box[data-overflow-y='1'] {
   align-items: flex-start;
 }
+.device-box[data-overflow-y='1'] .device-frame {
+  margin-top: var(--ring, 9px);
+}
 .device-box[data-overflow-x='1'] {
   justify-content: flex-start;
+}
+.device-box[data-overflow-x='1'] .device-frame {
+  margin-left: var(--ring, 9px);
 }
 
 /* 外框只画四周，中间的 .screen 必须保持空白且不被遮挡。
@@ -170,9 +180,29 @@
 
 .device-frame .screen {
   flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border-radius: var(--screen-radius, 34px);
   background: #000;
   overflow: hidden;
+}
+/* 视图藏起时顶上的静帧：按屏幕宽度铺满，左上对齐，与真实画面同一位置 */
+.device-frame .screen-frozen {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top left;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+/* 网页由原生视图绘制，盖在这层之上；只有视图被藏起时这行字才会露出来 */
+.device-frame .screen-hint {
+  color: #7b8395;
+  font-size: 12.5px;
+  padding: 0 16px;
+  text-align: center;
 }
 /* 手机的上圆角由状态栏那一条负责，屏幕只圆下面两角 */
 .device-frame.mobile .screen {

@@ -13,6 +13,7 @@ type Tab = 'projects' | 'workspace' | 'preview' | 'settings'
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('projects')
+  const [navOpen, setNavOpen] = useState(() => localStorage.getItem('ufc.navOpen') !== '0')
   const project = useApp((s) => s.project)
   const session = useApp((s) => s.session)
   const closeProject = useApp((s) => s.closeProject)
@@ -32,29 +33,43 @@ export default function App() {
     }
   }, [applyPatch, pushEvent, setSession])
 
+  useEffect(() => localStorage.setItem('ufc.navOpen', navOpen ? '1' : '0'), [navOpen])
+
   const waitingHuman = session?.state === 'awaiting_human'
 
   return (
     <div className="app">
-      <aside className="sidebar">
-        <h1>UI Flow Chart</h1>
+      <aside className={`sidebar${navOpen ? '' : ' collapsed'}`}>
+        <div className="sidebar-head">
+          {navOpen && <h1>UI Flow Chart</h1>}
+          <button
+            className="nav-toggle"
+            onClick={() => setNavOpen((v) => !v)}
+            title={navOpen ? '收起侧边栏' : '展开侧边栏'}
+            aria-label={navOpen ? '收起侧边栏' : '展开侧边栏'}
+          >
+            <Icon name={navOpen ? 'collapse' : 'expand'} size={16} />
+          </button>
+        </div>
+        {/* 收起时只留图标，文案退到 title 里 */}
         <nav>
           {/* 工作台不占独立入口：项目卡点进去就是工作台，标题栏可切项目 */}
           <button
             className={tab === 'projects' || tab === 'workspace' ? 'active' : ''}
             onClick={() => setTab(project ? 'workspace' : 'projects')}
+            title="项目"
           >
             <Icon name="projects" />
-            项目
+            {navOpen && '项目'}
             {waitingHuman && <span className="nav-dot" title="需要人工介入" />}
           </button>
-          <button className={tab === 'preview' ? 'active' : ''} onClick={() => setTab('preview')}>
+          <button className={tab === 'preview' ? 'active' : ''} onClick={() => setTab('preview')} title="真机预览">
             <Icon name="preview" />
-            真机预览
+            {navOpen && '真机预览'}
           </button>
-          <button className={tab === 'settings' ? 'active' : ''} onClick={() => setTab('settings')}>
+          <button className={tab === 'settings' ? 'active' : ''} onClick={() => setTab('settings')} title="AI 接口设置">
             <Icon name="settings" />
-            AI 接口设置
+            {navOpen && 'AI 接口设置'}
           </button>
         </nav>
 
@@ -62,8 +77,8 @@ export default function App() {
 
         {/* 只用一条分隔线把导航区与设置区分开，不做背景色区分 */}
         <div className="sidebar-foot">
-          <div className="sidebar-foot-label">设置</div>
-          <ThemeMenu />
+          {navOpen && <div className="sidebar-foot-label">设置</div>}
+          <ThemeMenu compact={!navOpen} />
         </div>
       </aside>
 
