@@ -26,20 +26,21 @@ export default function StatusBar({ width, height, radius, islandW, islandH }: P
     return () => window.clearInterval(t)
   }, [])
 
-  const icon = Math.round(height * 0.42)
+  // 真机上状态栏图标只有条高的三成左右，之前按 0.42 画得偏大
+  const icon = Math.round(height * 0.3)
 
   return (
     <div
       className="status-bar"
       style={{ width, height, borderRadius: `${radius}px ${radius}px 0 0`, paddingInline: Math.round(width * 0.07) }}
     >
-      <span className="sb-time" style={{ fontSize: Math.round(height * 0.42) }}>
+      <span className="sb-time" style={{ fontSize: Math.round(height * 0.34) }}>
         {time}
       </span>
 
       <span className="sb-island" style={{ width: islandW, height: islandH }} />
 
-      <span className="sb-icons" style={{ gap: Math.round(height * 0.14) }}>
+      <span className="sb-icons" style={{ gap: Math.round(height * 0.11) }}>
         {/* 信号：四格递增 */}
         <svg width={icon * 1.25} height={icon} viewBox="0 0 20 16" aria-hidden>
           {[0, 1, 2, 3].map((i) => (

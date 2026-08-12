@@ -13,12 +13,21 @@ interface Props {
 /** 状态栏高度占屏幕显示宽度的比例，取自真机（430 宽对约 50 高） */
 const STATUS_RATIO = 0.115
 
-/** 外框装饰占掉的空间：左右内边距、上下内边距 + 底部 home 条 */
-const CHROME = {
-  mobile: { x: 18, y: 34 },
-  tablet: { x: 24, y: 28 },
-  desktop: { x: 0, y: 30 },
+/**
+ * 外框装饰占掉的空间，按屏幕显示宽度的比例给出。
+ *
+ * 必须与 frameMetrics 的比例严格对应：早先这里写的是固定像素（18/34），
+ * 实际装饰（状态栏 11.5% + 上下边框 4.4% + home 条 2.2% + 外圈 3.2%）远不止那么多，
+ * 于是机身比容器高出一截，被 overflow:hidden 从上下两端切掉——
+ * 表现就是手机顶部与底部各出现一条「异常的白边」，底部导航条被拦腰截断。
+ */
+const CHROME_RATIO = {
+  mobile: { x: 0.076, y: 0.213 },
+  tablet: { x: 0.076, y: 0.076 },
+  desktop: { x: 0, y: 0 },
 }
+/** 桌面档的浏览器标题栏是固定高度 */
+const DESKTOP_BAR = 30
 
 /**
  * 按屏幕实际显示宽度算出外框各项尺寸。
@@ -52,8 +61,12 @@ export default function DeviceFrame({ device, zoom = 'fit', onScreenRect }: Prop
   const boxRef = useRef<HTMLDivElement>(null)
   const screenRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ width: 0, height: 0 })
-  /** 设备框是否超出可用区。渲染期间读 ref 拿到的是上一帧的尺寸，必须存成状态 */
-  const [overflow, setOverflow] = useState(false)
+  /**
+   * 两个方向分别记是否超出可用区。渲染期间读 ref 拿到的是上一帧尺寸，必须存成状态。
+   * 分方向是因为对齐方式也要分方向：放得下的那一轴居中，放不下的那一轴靠起点，
+   * 这样既不浪费空间，又能保住最该看见的顶部与左侧。
+   */
+  const [overflow, setOverflow] = useState({ x: false, y: false })
   const isPhone = device.kind === 'mobile'
 
   const measure = useCallback(() => {
@@ -63,18 +76,20 @@ export default function DeviceFrame({ device, zoom = 'fit', onScreenRect }: Prop
     // 一旦把它上报出去，主进程就会把原生视图摆到错误的小矩形上，
     // 表现为网页跑到设备外框之外。宁可先不报，等真实尺寸到位。
     if (box.clientWidth < 80 || box.clientHeight < 80) return
-    const chrome = CHROME[device.kind]
-    const availW = Math.max(60, box.clientWidth - chrome.x)
-    const availH = Math.max(60, box.clientHeight - chrome.y)
+    const chrome = CHROME_RATIO[device.kind]
+    const barH = device.kind === 'desktop' ? DESKTOP_BAR : 0
+    const availW = box.clientWidth
+    const availH = Math.max(60, box.clientHeight - barH)
     // 以设备宽高比为准，取能塞进可用区域的最大尺寸。
-    // 手机还要为状态栏留一条：它按屏幕宽度等比，所以先解出高度再回推宽度，
-    // 否则「先算宽、再减状态栏」会把机身撑出可用区
+    // 装饰是按屏幕宽度等比的，所以要连同装饰一起解方程：
+    // 宽向 w·(1+chrome.x) ≤ 可用宽；纵向 h + chrome.y·w ≤ 可用高。
+    // 先算宽再减装饰的话，机身一定会撑出容器，然后被切掉边缘。
     const ratio = device.width / device.height
-    const statusRatio = device.kind === 'mobile' ? STATUS_RATIO : 0
-    let h = availH / (1 + statusRatio * ratio)
+    let h = availH / (1 + chrome.y * ratio)
     let w = h * ratio
-    if (w > availW) {
-      w = availW
+    const maxW = availW / (1 + chrome.x)
+    if (w > maxW) {
+      w = maxW
       h = w / ratio
     }
     // 指定了倍数就按真实比例呈现，哪怕比可用区大——超出的部分由上报矩形时裁掉，
@@ -84,9 +99,10 @@ export default function DeviceFrame({ device, zoom = 'fit', onScreenRect }: Prop
       h = device.height * zoom
     }
     setSize({ width: Math.round(w), height: Math.round(h) })
-    // 装不下时改为左上对齐：居中会把状态栏和页面左边一起切掉，
-    // 而顶部与左侧恰恰是最需要保留的部分
-    setOverflow(w + chrome.x > box.clientWidth || h + chrome.y > box.clientHeight)
+    setOverflow({
+      x: w * (1 + chrome.x) > box.clientWidth + 1,
+      y: h + chrome.y * w + barH > box.clientHeight + 1,
+    })
   }, [device.kind, device.width, device.height, zoom])
 
   useLayoutEffect(() => {
@@ -156,7 +172,12 @@ export default function DeviceFrame({ device, zoom = 'fit', onScreenRect }: Prop
   const metrics = frameMetrics(device.kind, size.width)
 
   return (
-    <div className="device-box" ref={boxRef} data-overflow={overflow ? '1' : undefined}>
+    <div
+      className="device-box"
+      ref={boxRef}
+      data-overflow-x={overflow.x ? '1' : undefined}
+      data-overflow-y={overflow.y ? '1' : undefined}
+    >
       <div
         className={`device-frame ${device.kind}`}
         style={

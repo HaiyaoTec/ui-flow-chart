@@ -130,9 +130,12 @@
   justify-content: center;
   overflow: hidden;
 }
-/* 指定倍数放大到装不下时靠左上，居中会把状态栏也切掉 */
-.device-box[data-overflow='1'] {
+/* 放得下的方向保持居中；放不下的方向靠起点，
+   把最该看见的顶部与左侧留在可视区内 */
+.device-box[data-overflow-y='1'] {
   align-items: flex-start;
+}
+.device-box[data-overflow-x='1'] {
   justify-content: flex-start;
 }
 

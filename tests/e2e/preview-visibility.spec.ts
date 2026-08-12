@@ -31,6 +31,18 @@ test('弹层展开、面板收起、离开工作台时，原生视图都要让�
     await window.waitForTimeout(2000)
     expect(await visible(window), '进入工作台后视图应显示').toBe(true)
 
+    // 自适应下机身必须完整落在可用区内。装饰（状态栏、边框、home 条）都是按屏幕
+    // 宽度等比的，尺寸计算漏算它们就会让机身高出容器，被 overflow 从上下切掉，
+    // 表现为手机顶部与底部各一条白边
+    const fitBox = await window.evaluate(() => {
+      const f = document.querySelector('.device-frame')!.getBoundingClientRect()
+      const b = document.querySelector('.device-box')!.getBoundingClientRect()
+      return { top: Math.round(f.top - b.top), bottom: Math.round(b.bottom - f.bottom), left: Math.round(f.left - b.left) }
+    })
+    expect(fitBox.top, '机身顶部不能超出容器').toBeGreaterThanOrEqual(0)
+    expect(fitBox.bottom, '机身底部不能超出容器').toBeGreaterThanOrEqual(0)
+    expect(fitBox.left, '机身左侧不能超出容器').toBeGreaterThanOrEqual(0)
+
     // 1. 设备下拉：弹层是 HTML，展开期间视图必须藏起来
     await window.locator('.preview-toolbar .ufc-select').click()
     await window.waitForTimeout(500)
@@ -87,12 +99,20 @@ test('弹层展开、面板收起、离开工作台时，原生视图都要让�
 
     // 裁切时必须保留设备的顶部与左侧：屏幕占位区的左上角要在舞台内
     const anchored = await window.evaluate(() => {
+      const f = document.querySelector('.device-frame')!.getBoundingClientRect()
       const s = document.querySelector('.device-frame .screen')!.getBoundingClientRect()
       const stage = document.querySelector('.preview-stage')!.getBoundingClientRect()
-      return { dx: Math.round(s.left - stage.left), dy: Math.round(s.top - stage.top) }
+      return {
+        dx: Math.round(s.left - stage.left),
+        dy: Math.round(s.top - stage.top),
+        // 左右留白之差：为 0 即水平居中
+        centeredX: Math.abs(Math.round(f.left - stage.left) - Math.round(stage.right - f.right)),
+      }
     })
     expect(anchored.dx, '设备左侧不能被切到舞台外').toBeGreaterThanOrEqual(0)
     expect(anchored.dy, '设备顶部不能被切到舞台外').toBeGreaterThanOrEqual(0)
+    // 100% 时宽度放得下（预览列比 430 宽），这一轴应当仍然居中
+    expect(anchored.centeredX, '宽度够时应保持水平居中').toBeLessThanOrEqual(2)
 
     await window.locator('.zoom-select').click()
     await window.waitForTimeout(400)

@@ -240,7 +240,7 @@ export default function PreviewPane({ initialUrl = '', deviceId: boundDeviceId, 
         </span>
         <button className="link-btn" onClick={() => void diagnose()} disabled={busy}>
           <Icon name="diagnose" size={13} />
-          自检
+          设备信息
         </button>
       </div>
 
