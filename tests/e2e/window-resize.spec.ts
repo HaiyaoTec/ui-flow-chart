@@ -16,6 +16,20 @@ test('缩放窗口后界面视图始终铺满内容区', async () => {
         'test:ui-view-bounds'
       )
 
+    /*
+     * 最底层必须垫着一块纯色底板。
+     *
+     * BaseWindow 自己没有内容，setBackgroundColor 只存值、没有图层去画；
+     * 拖动边框时新露出的区域会显出窗口的黑底。底板是不含 WebContents 的 View，
+     * 由合成器直接画，不存在「等渲染进程出帧」，所以那条区域才是主题色。
+     */
+    const stack = await app.evaluate(({ BaseWindow }) => {
+      const kids = BaseWindow.getAllWindows()[0].contentView.children
+      return { kinds: kids.map((v) => v.constructor.name), first: kids[0]?.getBounds() }
+    })
+    expect(stack.kinds[0], '最底层应当是纯色底板 View').toBe('View')
+    expect(stack.first!.width, '底板要留足冗余，拖拽期间不必跟着改尺寸').toBeGreaterThan(4000)
+
     for (const d of [
       { dw: 180, dh: 0 },
       { dw: 0, dh: 140 },

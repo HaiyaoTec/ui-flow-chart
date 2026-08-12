@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { BaseWindow, Menu, nativeTheme, shell, WebContentsView, type WebContents } from 'electron'
+import { BaseWindow, Menu, nativeTheme, shell, View, WebContentsView, type WebContents } from 'electron'
 import { getSettings } from './store/settings'
 
 /**
@@ -23,6 +23,8 @@ export function themeBackground(): string {
  * 既不用隐藏预览，也不用抓帧顶替，切换是瞬时的。
  */
 let uiView: WebContentsView | null = null
+/** 垫在最底层的纯色底板，见 createMainWindow 里的说明 */
+let backdrop: View | null = null
 
 export function getUiContents(): WebContents | null {
   return uiView && !uiView.webContents.isDestroyed() ? uiView.webContents : null
@@ -41,6 +43,20 @@ export function createMainWindow(): BaseWindow {
     backgroundColor: themeBackground(),
     title: 'UI Flow Chart',
   })
+
+  /**
+   * 最底层的纯色底板。
+   *
+   * BaseWindow 自己没有内容，setBackgroundColor 只是存了个值，没有图层去画它——
+   * 拖动边框时新露出的区域于是显出窗口的黑色底，这就是那条黑边。
+   * 垫一个不含 WebContents 的 View：它是纯色图层，由合成器直接画，没有「等渲染进程出帧」
+   * 这回事。尺寸给足冗余，拖拽期间不必跟着改，永远盖得住新露出的部分。
+   */
+  const back = new View()
+  back.setBackgroundColor(themeBackground())
+  back.setBounds({ x: 0, y: 0, width: 16000, height: 16000 })
+  backdrop = back
+  win.contentView.addChildView(back)
 
   const view = new WebContentsView({
     webPreferences: {
@@ -114,6 +130,7 @@ export function createMainWindow(): BaseWindow {
   win.on('closed', () => {
     nativeTheme.off('updated', syncBackground)
     uiView = null
+    backdrop = null
   })
 
   if (process.env.ELECTRON_RENDERER_URL) {
@@ -137,12 +154,7 @@ export function getUiView(): WebContentsView | null {
  * 窗口底色管不到这里：界面已经是覆盖在窗口上的子视图了。
  */
 export function applyViewBackground(): void {
-  if (!uiView) return
   const color = themeBackground()
-  // 两处都要设：View 的底色管「视图自己那块画布」，
-  // webContents 的底色管「页面还没光栅化出来的区域」——后者默认是透明的，
-  // 透出去就是窗口的黑色底板，正是拖边框时右侧/下方那条黑边
-  uiView.setBackgroundColor(color)
-  const wc = uiView.webContents as unknown as { setBackgroundColor?: (c: string) => void }
-  wc.setBackgroundColor?.(color)
+  uiView?.setBackgroundColor(color)
+  backdrop?.setBackgroundColor(color)
 }
