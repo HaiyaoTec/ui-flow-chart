@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { CH } from '@shared/ipc-contract'
 import type { AiProfileMasked, AiProtocol, AiTestResult, AppSettings } from '@shared/types'
+import Icon from '../components/Icon'
 import Modal from '../components/Modal'
 import { invoke } from '../ipc'
 
@@ -96,7 +97,7 @@ export default function SettingsView() {
 
   return (
     <div className="main">
-      <div className="row" style={{ alignItems: 'flex-start' }}>
+      <div className="page-head">
         <div className="grow">
           <h2>AI 接口设置</h2>
           <div className="sub">
@@ -104,6 +105,7 @@ export default function SettingsView() {
           </div>
         </div>
         <button className="primary" onClick={startCreate}>
+          <Icon name="add" />
           新建配置
         </button>
       </div>
@@ -111,12 +113,8 @@ export default function SettingsView() {
       <div className="card">
         {profiles.length === 0 && <div className="empty">还没有配置，点右上角「新建配置」开始。</div>}
         {profiles.map((p) => (
-          <div
-            key={p.id}
-            className="row"
-            style={{ padding: '12px 0', borderTop: '1px solid var(--line)', alignItems: 'flex-start' }}
-          >
-            <div className="grow">
+          <div key={p.id} className="profile-row">
+            <div className="info">
               <div className="row" style={{ gap: 8 }}>
                 <strong>{p.name}</strong>
                 <span className="badge">{PROTOCOL_PRESETS[p.protocol].label}</span>
@@ -126,20 +124,25 @@ export default function SettingsView() {
                   </span>
                 )}
               </div>
-              <div className="muted mono" style={{ fontSize: 11.5 }}>
+              <div className="meta mono">
                 {p.baseUrl} · {p.model} · Key {p.keyMasked || '未设置'}
               </div>
-              {result?.profileId === p.id && !result.ok && (
-                <div style={{ color: 'var(--danger)', fontSize: 11.5, marginTop: 4 }}>{result.error}</div>
-              )}
+              {result?.profileId === p.id && !result.ok && <div className="err-text">{result.error}</div>}
             </div>
-            <button onClick={() => void test(p.id)} disabled={Boolean(testing)}>
-              {testing === p.id ? '测试中…' : '测试连接'}
-            </button>
-            <button onClick={() => startEdit(p)}>编辑</button>
-            <button className="danger" onClick={() => void remove(p.id)}>
-              删除
-            </button>
+            <div className="acts">
+              <button onClick={() => void test(p.id)} disabled={Boolean(testing)}>
+                <Icon name="diagnose" />
+                {testing === p.id ? '测试中…' : '测试连接'}
+              </button>
+              <button onClick={() => startEdit(p)}>
+                <Icon name="edit" />
+                编辑
+              </button>
+              <button className="danger" onClick={() => void remove(p.id)}>
+                <Icon name="delete" />
+                删除
+              </button>
+            </div>
           </div>
         ))}
       </div>

@@ -1,5 +1,14 @@
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
-import { evalPreview, ipc, launchApp, startTestSite, TEST_SITE, TEST_SITE_PORT, waitFor } from './helpers'
+import {
+  evalPreview,
+  ipc,
+  launchApp,
+  openFirstProject,
+  startTestSite,
+  TEST_SITE,
+  TEST_SITE_PORT,
+  waitFor,
+} from './helpers'
 
 /**
  * 设备模拟的持久性回归。
@@ -112,12 +121,7 @@ test('窗口缩放导致面板平移时，视图位置必须跟上', async () =>
     aiProfileId: profile.id,
     goal: 'x',
   })
-  await window.locator('.sidebar').getByRole('button', { name: /项目/ }).click()
-  await window.waitForTimeout(500)
-  await window.getByRole('button', { name: '打开' }).first().click()
-  await window.waitForTimeout(1000)
-  // 固定到「画布为主」，即 1fr + 460px 的固定宽列
-  await window.getByRole('button', { name: '画布为主' }).click()
+  await openFirstProject(window)
   await ipc(window, 'preview:navigate', { url: `${TEST_SITE}/ua-echo.html` })
   await window.waitForTimeout(1800)
 

@@ -3,7 +3,7 @@ import { getDevice } from '@shared/devices'
 import { CH } from '@shared/ipc-contract'
 import type { FlowEdge, FlowLane, FlowNode, SessionBudgets, SessionSnapshot } from '@shared/types'
 import { createAiClient } from '../ai'
-import { getProject, partitionOf, touchProject } from '../store/projects'
+import { getProject, partitionOf, touchProject, updateProjectRun } from '../store/projects'
 import { ExplorerSession } from './ExplorerSession'
 import { preview } from './previewManager'
 
@@ -42,6 +42,25 @@ class SessionManager {
     }
   }
 
+  /** 把会话快照写进项目元数据，节点数从当前图谱里取 */
+  private persistRun(projectId: string, snapshot: SessionSnapshot, reason?: string): void {
+    try {
+      const nodes = this.session?.graphNodeCount() ?? 0
+      updateProjectRun(projectId, {
+        state: snapshot.state,
+        steps: snapshot.step,
+        screens: snapshot.screens,
+        aiCalls: snapshot.aiCalls,
+        nodes,
+        startedAt: snapshot.startedAt ?? new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        reason: reason ?? snapshot.reason,
+      })
+    } catch {
+      // 落盘失败不该影响探索本身
+    }
+  }
+
   private ensure(projectId: string): ExplorerSession {
     const meta = getProject(projectId)
     if (!meta) throw new Error('项目不存在')
@@ -57,6 +76,11 @@ class SessionManager {
         this.send(CH.evSession, { ...event, snapshot })
         if (event.kind === 'need-human') this.alertHuman(meta.name, event.reason)
         if (event.kind === 'finished') this.notify(`${meta.name} 探索完成`, `共 ${snapshot.screens} 屏、${snapshot.step} 步`)
+        // 状态每变一次就落盘一次：会话只活在内存里，
+        // 不落盘的话退出应用后项目列表就再也不知道上次跑到哪了
+        if (event.kind === 'state-changed' || event.kind === 'finished') {
+          this.persistRun(meta.id, snapshot, event.kind === 'state-changed' ? event.reason : undefined)
+        }
       },
       emitPatch: (lanes: FlowLane[], nodes: FlowNode[], edges: FlowEdge[]) =>
         this.send(CH.evGraphPatch, { addedLanes: lanes, addedNodes: nodes, addedEdges: edges }),

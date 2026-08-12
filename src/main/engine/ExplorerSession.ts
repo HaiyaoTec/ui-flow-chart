@@ -57,6 +57,11 @@ export class ExplorerSession {
   private state: SessionState = 'idle'
   private project: ProjectMeta | null = null
   private store: GraphStore | null = null
+
+  /** 当前图谱的节点数，供项目列表展示「沉淀了多少界面」 */
+  graphNodeCount(): number {
+    return this.store?.get().nodes.length ?? 0
+  }
   private budgets: SessionBudgets = DEFAULT_BUDGETS
   private goal = ''
   private step = 0

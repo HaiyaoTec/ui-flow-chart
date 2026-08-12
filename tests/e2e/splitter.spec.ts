@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { ipc, launchApp, startTestSite, TEST_SITE } from './helpers'
+import { ipc, launchApp, openFirstProject, startTestSite, TEST_SITE } from './helpers'
 
 /** 画布与预览的分栏可拖动，且两侧各有最小宽度兜底 */
 test('拖动分栏调整占比，两侧最小宽度不被突破', async () => {
@@ -17,10 +17,7 @@ test('拖动分栏调整占比，两侧最小宽度不被突破', async () => {
       aiProfileId: profile.id,
       goal: 'x',
     })
-    await window.locator('.sidebar').getByRole('button', { name: /项目/ }).click()
-    await window.waitForTimeout(500)
-    await window.getByRole('button', { name: '打开' }).first().click()
-    await window.waitForTimeout(1200)
+    await openFirstProject(window)
     // 先把预览跑起来，后面才能断言原生视图跟着分栏变化
     await ipc(window, 'preview:navigate', { url: `${TEST_SITE}/ua-echo.html` })
     await window.waitForTimeout(1800)
@@ -34,6 +31,15 @@ test('拖动分栏调整占比，两侧最小宽度不被突破', async () => {
           body: Math.round(q('.ws-body')?.getBoundingClientRect().width ?? -1),
         }
       })
+
+    // 两条工具栏并排，高度必须一致，否则中缝两侧的分隔线错位
+    const bars = await window.evaluate(() => {
+      const h = (s: string) => Math.round(document.querySelector(s)?.getBoundingClientRect().height ?? -1)
+      return { canvas: h('.canvas-toolbar'), preview: h('.preview-toolbar') }
+    })
+    // 先确认真的量到了：两个都取不到时也会「相等」，那样断言等于没测
+    expect(bars.canvas, '没找到画布工具栏').toBeGreaterThan(30)
+    expect(bars.canvas, `画布工具栏 ${bars.canvas} 应等于预览工具栏 ${bars.preview}`).toBe(bars.preview)
 
     const splitter = window.locator('.ws-splitter')
     await expect(splitter).toBeVisible()

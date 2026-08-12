@@ -11,7 +11,14 @@ import { exportProjectHtml } from '../export/exportHtml'
 import { exportProjectPng } from '../export/exportPng'
 import { deleteProfile, listProfiles, saveProfile } from '../store/credentials'
 import { projectDir, readJson } from '../store/paths'
-import { clearProjectSession, createProject, deleteProject, getProject, listProjects } from '../store/projects'
+import {
+  clearProjectSession,
+  createProject,
+  deleteProject,
+  getProject,
+  listProjects,
+  partitionOf,
+} from '../store/projects'
 import { getSettings, setSettings } from '../store/settings'
 
 type Handler<C extends InvokeChannel> = (
@@ -82,9 +89,21 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   /* --------------------------------- 项目 --------------------------------- */
   handle(CH.projectCreate, (input) => createProject(input))
   handle(CH.projectList, () => listProjects())
-  handle(CH.projectOpen, ({ id }) => {
+  handle(CH.projectOpen, async ({ id }) => {
     const meta = getProject(id)
     if (!meta) throw new Error('项目不存在')
+
+    // 预览必须跟着项目走：换项目要换目标地址、设备与会话分区，
+    // 否则右侧还停在上一个项目的页面和登录态上。
+    // 正在跑的会话独占预览，此时不去打断它。
+    const busy = sessions.snapshot()
+    const canRebind = busy.projectId !== id && !['observing', 'thinking', 'acting', 'awaiting_human'].includes(busy.state)
+    if (canRebind) {
+      void preview
+        .open(meta.targetUrl, getDevice(meta.deviceId, meta.customDevice), partitionOf(meta.id))
+        .catch(() => undefined)
+    }
+
     return { meta, graph: loadGraph(id) }
   })
   handle(CH.projectDelete, ({ id }) => {

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { CH } from '@shared/ipc-contract'
+import Icon from './components/Icon'
 import PreviewPane from './components/preview/PreviewPane'
 import ThemeMenu from './components/ThemeMenu'
 import { invoke, on } from './ipc'
@@ -38,33 +39,32 @@ export default function App() {
       <aside className="sidebar">
         <h1>UI Flow Chart</h1>
         <nav>
-          <button className={tab === 'projects' ? 'active' : ''} onClick={() => setTab('projects')}>
-            <span className="emoji">📁</span>项目
-          </button>
+          {/* 工作台不占独立入口：项目卡点进去就是工作台，标题栏可切项目 */}
           <button
-            className={tab === 'workspace' ? 'active' : ''}
-            onClick={() => project && setTab('workspace')}
-            disabled={!project}
+            className={tab === 'projects' || tab === 'workspace' ? 'active' : ''}
+            onClick={() => setTab(project ? 'workspace' : 'projects')}
           >
-            <span className="emoji">🧭</span>工作台
+            <Icon name="projects" />
+            项目
             {waitingHuman && <span className="nav-dot" title="需要人工介入" />}
           </button>
           <button className={tab === 'preview' ? 'active' : ''} onClick={() => setTab('preview')}>
-            <span className="emoji">📱</span>真机预览
+            <Icon name="preview" />
+            真机预览
           </button>
           <button className={tab === 'settings' ? 'active' : ''} onClick={() => setTab('settings')}>
-            <span className="emoji">⚙️</span>AI 接口设置
+            <Icon name="settings" />
+            AI 接口设置
           </button>
         </nav>
 
         <div className="spacer" />
 
-        {project && (
-          <div className="muted" style={{ fontSize: 11, padding: '0 6px 10px' }}>
-            当前项目：{project.name}
-          </div>
-        )}
-        <ThemeMenu />
+        {/* 只用一条分隔线把导航区与设置区分开，不做背景色区分 */}
+        <div className="sidebar-foot">
+          <div className="sidebar-foot-label">设置</div>
+          <ThemeMenu />
+        </div>
       </aside>
 
       {tab === 'projects' && (
@@ -77,6 +77,7 @@ export default function App() {
             closeProject()
             setTab('projects')
           }}
+          onSwitchProject={() => setTab('workspace')}
         />
       )}
       {tab === 'preview' && <PreviewPane initialUrl="http://localhost:4173" />}

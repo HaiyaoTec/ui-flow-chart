@@ -1,7 +1,10 @@
 import { join } from 'node:path'
-import { BrowserWindow, shell } from 'electron'
+import { BrowserWindow, Menu, shell } from 'electron'
 
 export function createMainWindow(): BrowserWindow {
+  // 应用没有需要放进系统菜单的功能，File/Edit/View 这类默认菜单只是噪声
+  Menu.setApplicationMenu(null)
+
   const win = new BrowserWindow({
     width: 1560,
     height: 1000,

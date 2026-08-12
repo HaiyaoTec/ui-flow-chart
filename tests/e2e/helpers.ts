@@ -1,4 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
+import { mkdirSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { _electron as electron, type ElectronApplication, type Page } from '@playwright/test'
@@ -25,10 +27,13 @@ export async function startTestSite(): Promise<() => void> {
 }
 
 export async function launchApp(): Promise<{ app: ElectronApplication; window: Page }> {
+  // 测试数据一律写到临时目录：早先没隔离，测试建的项目跑进了用户真实的项目列表
+  const dataDir = join(tmpdir(), `ufc-e2e-${process.pid}-${Date.now()}`)
+  mkdirSync(dataDir, { recursive: true })
   const app = await electron.launch({
     args: [ROOT],
     cwd: ROOT,
-    env: { ...process.env, UFC_TEST: '1' },
+    env: { ...process.env, UFC_TEST: '1', UFC_DATA_DIR: dataDir },
   })
   // 主进程的报错要冒出来，否则测试只会看到「页面已关闭」这种无信息量的现象
   app.process().stderr?.on('data', (d: Buffer) => console.error('[main stderr]', d.toString().trim()))
@@ -69,6 +74,22 @@ export async function waitFor(cond: () => Promise<boolean> | boolean, timeoutMs 
     await new Promise((r) => setTimeout(r, interval))
   }
   throw new Error('等待超时')
+}
+
+/**
+ * 从侧边栏进入第一个项目的工作台。
+ *
+ * 项目列表只在挂载时拉一次，用 IPC 直接建的项目不会自动出现在已挂载的列表里，
+ * 所以先切到别的页再切回来，强制重挂。
+ */
+export async function openFirstProject(window: Page): Promise<void> {
+  const nav = (name: RegExp) => window.locator('.sidebar').getByRole('button', { name })
+  await nav(/真机预览/).click()
+  await window.waitForTimeout(400)
+  await nav(/项目/).click()
+  // 项目卡整块可点即进入，没有独立的「打开」按钮
+  await window.locator('.project-card').first().click({ timeout: 15000 })
+  await window.waitForTimeout(1200)
 }
 
 /** 读取测试站记录的请求头日志 */

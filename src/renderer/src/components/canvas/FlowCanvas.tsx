@@ -27,6 +27,7 @@ export default function FlowCanvas({ graph, projectId, device, newNodeIds = [] }
 
   const layout = useMemo(() => computeLayout(graph, device), [graph, device])
   const edges = useMemo(() => routeEdges(graph.edges, layout), [graph.edges, layout])
+  const isEmpty = layout.positions.size === 0
   const { zoom, zoomAt, fit, fitWidth, reset, focusNode } = usePanZoom(stageRef, worldRef)
 
   // 版面变化后立刻做一次去重叠；用真实渲染矩形判定，所以必须在布局阶段跑
@@ -104,18 +105,22 @@ export default function FlowCanvas({ graph, projectId, device, newNodeIds = [] }
         </span>
       </div>
 
-      <div className="canvas-lanes">
-        {graph.lanes.map((l) => (
-          <label key={l.id} className="seg">
-            <input type="checkbox" checked={!hidden(l.id)} onChange={() => toggleLane(l.id)} />
-            {l.title}
-          </label>
-        ))}
-      </div>
+      {/* 没有泳道时这一整条是空的，别留一条空白占位 */}
+      {graph.lanes.length > 0 && (
+        <div className="canvas-lanes">
+          {graph.lanes.map((l) => (
+            <label key={l.id} className="seg">
+              <input type="checkbox" checked={!hidden(l.id)} onChange={() => toggleLane(l.id)} />
+              {l.title}
+            </label>
+          ))}
+        </div>
+      )}
 
       <div className="ufc-stage" ref={stageRef}>
         <div className="ufc-world" ref={worldRef} style={{ width: layout.worldW, height: layout.worldH }}>
-          {layout.laneBoxes.map((b) => (
+          {/* 图谱为空时不画泳道框，否则会出现一个空的灰色方块 */}
+          {isEmpty ? null : layout.laneBoxes.map((b) => (
             <div
               key={b.lane.id}
               className={`ufc-lane ${hidden(b.lane.id) ? 'ufc-hidden' : ''}`}
@@ -186,9 +191,7 @@ export default function FlowCanvas({ graph, projectId, device, newNodeIds = [] }
         </div>
       </div>
 
-      {layout.positions.size === 0 && (
-        <div className="canvas-empty">还没有界面。启动探索后，每发现一屏就会实时出现在这里。</div>
-      )}
+      {isEmpty && <div className="canvas-empty">还没有界面。启动探索后，每发现一屏就会实时出现在这里。</div>}
     </div>
   )
 }

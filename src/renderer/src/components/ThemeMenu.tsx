@@ -2,14 +2,15 @@ import { useEffect, useRef, useState } from 'react'
 import { CH } from '@shared/ipc-contract'
 import type { AppSettings } from '@shared/types'
 import { invoke } from '../ipc'
+import Icon, { type IconName } from './Icon'
 import './theme-menu.css'
 
 type Theme = AppSettings['theme']
 
-const OPTIONS: Array<{ value: Theme; label: string; icon: string }> = [
-  { value: 'light', label: '浅色', icon: '☀️' },
-  { value: 'dark', label: '深色', icon: '🌙' },
-  { value: 'system', label: '跟随系统', icon: '💻' },
+const OPTIONS: Array<{ value: Theme; label: string; icon: IconName }> = [
+  { value: 'light', label: '浅色', icon: 'themeLight' },
+  { value: 'dark', label: '深色', icon: 'themeDark' },
+  { value: 'system', label: '跟随系统', icon: 'themeSystem' },
 ]
 
 /**
@@ -28,16 +29,23 @@ export default function ThemeMenu() {
     void invoke(CH.settingsGet).then((s) => setTheme(s.theme))
   }, [])
 
-  // 无论是用户切换还是系统自己变，都以 prefers-color-scheme 为准落到 data-theme
+  /**
+   * 主题由渲染进程自己判定。
+   *
+   * 实测：主进程设了 nativeTheme.themeSource='dark'（shouldUseDarkColors 也确实是 true），
+   * 已经创建好的窗口里 prefers-color-scheme 却纹丝不动。所以不能把它当作唯一事实源——
+   * 选了具体主题就直接用，只有「跟随系统」才去查媒体查询。
+   */
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
     const apply = () => {
-      document.documentElement.setAttribute('data-theme', mq.matches ? 'dark' : 'light')
+      const dark = theme === 'system' ? mq.matches : theme === 'dark'
+      document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')
     }
     apply()
     mq.addEventListener('change', apply)
     return () => mq.removeEventListener('change', apply)
-  }, [])
+  }, [theme])
 
   useEffect(() => {
     if (!open) return
@@ -64,7 +72,7 @@ export default function ThemeMenu() {
   return (
     <div className="theme-menu" ref={boxRef}>
       <button className="theme-trigger" onClick={() => setOpen((v) => !v)} aria-haspopup="menu" aria-expanded={open}>
-        <span className="icon emoji">{current.icon}</span>
+        <Icon name={current.icon} />
         <span className="grow">{current.label}</span>
         <span className="caret">›</span>
       </button>
@@ -73,7 +81,7 @@ export default function ThemeMenu() {
         <div className="theme-pop" role="menu">
           {OPTIONS.map((o) => (
             <button key={o.value} role="menuitemradio" aria-checked={theme === o.value} onClick={() => void pick(o.value)}>
-              <span className="icon emoji">{o.icon}</span>
+              <Icon name={o.icon} />
               <span className="grow">{o.label}</span>
               {theme === o.value && <span className="check">✓</span>}
             </button>

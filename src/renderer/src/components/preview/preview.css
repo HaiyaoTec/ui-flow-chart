@@ -10,11 +10,17 @@
   display: flex;
   gap: 6px;
   align-items: center;
-  padding: 8px 10px;
+  padding: 6px 10px;
+  min-height: var(--toolbar-h);
   border-bottom: 1px solid var(--line);
   background: var(--panel);
   flex-wrap: nowrap;
   overflow: hidden;
+}
+/* 表单控件默认比按钮高一档，压回同一高度，整条栏才对得上画布那条 */
+.preview-toolbar select,
+.preview-toolbar input.url {
+  padding: 6px 9px;
 }
 .preview-toolbar select {
   flex: 0 1 auto;

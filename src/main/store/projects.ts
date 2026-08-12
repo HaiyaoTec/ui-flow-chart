@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { session } from 'electron'
-import type { DeviceSpec, ProjectMeta } from '@shared/types'
+import type { DeviceSpec, ProjectMeta, ProjectRunSummary } from '@shared/types'
 import { projectDir, projectsRoot, readJson, writeJsonAtomic } from './paths'
 
 const metaFile = (id: string) => join(projectDir(id), 'project.json')
@@ -40,6 +40,17 @@ export function touchProject(id: string): void {
   const meta = getProject(id)
   if (!meta) return
   writeJsonAtomic(metaFile(id), { ...meta, updatedAt: new Date().toISOString() })
+}
+
+/**
+ * 记录最近一次探索的结果。
+ * 会话状态活在内存里，退出应用就没了；项目列表要在没有活动会话时
+ * 也能显示「已完成 / 已中断 / 未开始」，就得把结果落到项目元数据上。
+ */
+export function updateProjectRun(id: string, run: ProjectRunSummary): void {
+  const meta = getProject(id)
+  if (!meta) return
+  writeJsonAtomic(metaFile(id), { ...meta, lastRun: run, updatedAt: new Date().toISOString() })
 }
 
 export function deleteProject(id: string): void {

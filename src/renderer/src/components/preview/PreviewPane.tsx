@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { DEVICE_PRESETS, getDevice } from '@shared/devices'
 import { CH, type NavState, type PreviewDiagnosis } from '@shared/ipc-contract'
 import { invoke, on } from '../../ipc'
+import Icon from '../Icon'
 import DeviceFrame from './DeviceFrame'
 import './preview.css'
 
@@ -98,13 +99,18 @@ export default function PreviewPane({ initialUrl = '', onDeviceChange }: Props) 
           placeholder="http://localhost:4173"
         />
         <button onClick={() => void go()} disabled={busy}>
-          <span className="emoji">🌐</span>打开
+          <Icon name="open" />
+          打开
         </button>
-        <button onClick={() => void invoke(CH.previewNavigate, { action: 'back' })} disabled={!nav?.canGoBack}>
-          <span className="emoji">⬅️</span>
+        <button
+          onClick={() => void invoke(CH.previewNavigate, { action: 'back' })}
+          disabled={!nav?.canGoBack}
+          title="后退"
+        >
+          <Icon name="back" />
         </button>
-        <button onClick={() => void invoke(CH.previewNavigate, { action: 'reload' })}>
-          <span className="emoji">🔄</span>
+        <button onClick={() => void invoke(CH.previewNavigate, { action: 'reload' })} title="刷新">
+          <Icon name="reload" />
         </button>
       </div>
 
@@ -120,14 +126,18 @@ export default function PreviewPane({ initialUrl = '', onDeviceChange }: Props) 
           {nav?.url || '(未导航)'}
         </span>
         <button className="link-btn" onClick={() => void diagnose()} disabled={busy}>
-          <span className="emoji">🩺</span>自检
+          <Icon name="diagnose" size={13} />
+          自检
         </button>
       </div>
 
       {diag && (
         <div className={`preview-diag ${diag.ok ? 'ok' : 'bad'}`}>
           <div className="row">
-            <strong>{diag.ok ? '✅ 设备模拟正常' : '⚠️ 设备模拟未完全生效'}</strong>
+            <strong>
+              <Icon name={diag.ok ? 'takeoverEnd' : 'warn'} size={14} />
+              {diag.ok ? '设备模拟正常' : '设备模拟未完全生效'}
+            </strong>
             <span className="grow" />
             {!diag.ok && (
               <button onClick={() => void heal()} disabled={busy}>

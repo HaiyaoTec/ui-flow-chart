@@ -76,32 +76,18 @@
   pointer-events: none;
 }
 
+/* 分栏就是一条 1px 的分隔线，视觉上不该比内容更显眼。
+   可抓取区域靠透明的伪元素向两侧扩出去，手感不受细线影响 */
 .ws-splitter {
   position: relative;
   cursor: col-resize;
   background: var(--line);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.15s;
 }
-.ws-splitter:hover,
-.ws-body.dragging .ws-splitter {
-  background: var(--accent);
-}
-/* 视觉上是一条细线，实际可抓取区域向两侧各扩 4px，好点中 */
+/* 反馈只靠指针形状，不做颜色变化——一条贯穿全高的线一变色就很扎眼 */
 .ws-splitter::before {
   content: '';
   position: absolute;
   inset: 0 -4px;
-}
-.ws-splitter span {
-  width: 2px;
-  height: 26px;
-  border-radius: 2px;
-  background: var(--bg);
-  opacity: 0.6;
-  pointer-events: none;
 }
 
 .ws-side {

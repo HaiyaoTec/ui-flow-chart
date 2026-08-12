@@ -12,10 +12,17 @@
   display: flex;
   gap: 8px;
   align-items: center;
-  padding: 8px 12px;
+  padding: 6px 12px;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
   flex-wrap: wrap;
+}
+/* 与预览工具栏同高：两条栏并排，差几像素分隔线就对不齐 */
+.canvas-toolbar {
+  min-height: var(--toolbar-h);
+}
+.canvas-toolbar button {
+  padding: 6px 10px;
 }
 .canvas-lanes {
   padding: 6px 12px;

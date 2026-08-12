@@ -193,6 +193,20 @@ export interface ProjectMeta {
   goal: string
   createdAt: string
   updatedAt: string
+  /** 最近一次探索的结果快照，供项目列表在没有活动会话时也能显示状态 */
+  lastRun?: ProjectRunSummary
+}
+
+export interface ProjectRunSummary {
+  state: SessionState
+  steps: number
+  screens: number
+  aiCalls: number
+  /** 图谱里的节点数，代表这次探索沉淀了多少界面 */
+  nodes: number
+  startedAt: string
+  updatedAt: string
+  reason?: string
 }
 
 /* ------------------------------- 探索会话 -------------------------------- */

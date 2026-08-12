@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import { app, BrowserWindow, nativeTheme } from 'electron'
 import { registerIpc } from './ipc/registry'
 import { registerUfcProtocol, registerUfcSchemePrivileges } from './protocol'
@@ -6,6 +7,12 @@ import { createMainWindow } from './window'
 
 // 必须在 app ready 之前声明，之后再注册就晚了
 registerUfcSchemePrivileges()
+
+// 测试模式下把应用数据整体挪到临时目录：
+// 否则自动化会改写用户真实的 settings.json 与 profiles.json
+if (process.env.UFC_DATA_DIR) {
+  app.setPath('userData', join(process.env.UFC_DATA_DIR, 'userData'))
+}
 
 // 单实例：第二次启动时聚焦已有窗口。
 // 自动化测试要能并行起多个实例，故在测试模式下跳过这道锁。

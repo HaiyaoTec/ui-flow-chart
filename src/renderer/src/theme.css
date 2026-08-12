@@ -1,16 +1,22 @@
+/* 深色色阶：底 → 面 → 控件 逐级提亮，每级差距拉开到看得出层次。
+   原先 bg/panel 只差 3 点亮度，内容区和操作区糊成一片。
+   强调色也压暗了一档：纯亮绿在深底上对比过强，选中态会跳出来打断阅读。 */
 :root {
-  --bg: #12141a;
-  --panel: #1a1d25;
-  --panel-2: #232733;
-  --grid: #1b1e26;
-  --fg: #e8eaf0;
-  --muted: #8f97a8;
-  --line: #2a2f3a;
-  --accent: #2ecc71;
-  --branch: #f0a04b;
-  --back: #7aa2f7;
-  --link: #b48ead;
-  --danger: #e05561;
+  --bg: #0d0f14;
+  --panel: #171a21;
+  --panel-2: #22262f;
+  --grid: #191c23;
+  --fg: #e4e7ee;
+  --muted: #8b93a3;
+  --line: #2b3038;
+  --accent: #35b56b;
+  --accent-soft: #1e3a2a;
+  --branch: #d98b3f;
+  --back: #6b90e0;
+  --link: #a37fa0;
+  --danger: #d4525e;
+  /* 画布与预览各有一条工具栏，并排时高度必须一致，否则中缝两侧的分隔线错位 */
+  --toolbar-h: 46px;
   color-scheme: dark;
 }
 
@@ -23,6 +29,7 @@
   --muted: #5d6577;
   --line: #d8dbe4;
   --accent: #18995a;
+  --accent-soft: #e3f3ea;
   --branch: #c46a10;
   --back: #3b6dd8;
   --link: #8a5c86;
@@ -32,6 +39,38 @@
 
 * {
   box-sizing: border-box;
+}
+
+/* 滚动条：细、圆、常态几乎不显形，悬停才加深。
+   注意不能再写 scrollbar-width / scrollbar-color——Chromium 里一旦用了这两个
+   标准属性，整套 ::-webkit-scrollbar 规则就被忽略，退回带上下箭头的系统样式。 */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+/* 两端的步进箭头一律不要：只保留一条可拖的滑块 */
+::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+::-webkit-scrollbar-thumb {
+  /* 用 muted 调淡而不是直接用 --line：浅色主题下 --line 太浅，滑块几乎看不见 */
+  background: color-mix(in srgb, var(--muted) 42%, transparent);
+  border-radius: 999px;
+  /* 用透明边框把滑块收窄，同时保留足够的可抓取宽度 */
+  border: 3.5px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 html,
@@ -88,6 +127,34 @@ textarea {
   border-radius: 8px;
   padding: 8px 11px;
   width: 100%;
+}
+/* 下拉框统一外观：关掉系统绘制，换成与自定义菜单（主题、项目切换）同一枚
+   Lucide chevron，圆角、边框、悬停反馈也与按钮一致。
+   箭头用中性灰，深浅两套主题下都够清楚，不必随主题换图。 */
+select {
+  appearance: none;
+  cursor: pointer;
+  padding-right: 30px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238b93a3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  background-size: 15px 15px;
+  transition: border-color 0.15s;
+}
+select:hover {
+  border-color: var(--accent);
+}
+select option {
+  background: var(--panel);
+  color: var(--fg);
+}
+
+/* 只允许纵向拖高：横向拖动会把输入框拉出卡片外，且宽度本就该跟随布局 */
+textarea {
+  resize: vertical;
+  max-width: 100%;
+  min-height: 72px;
+  line-height: 1.6;
 }
 input:focus,
 select:focus,
@@ -156,12 +223,46 @@ label.field > .hint {
   background: transparent;
   border-color: transparent;
 }
+/* 选中态用低饱和的强调底 + 左侧色条，而不是整块高对比反色 */
 .sidebar nav button.active {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--fg);
+  position: relative;
+}
+.sidebar nav button.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: var(--accent);
+}
+.sidebar nav button.active .icon {
+  color: var(--accent);
+}
+.sidebar nav button:hover:not(.active) {
   background: var(--panel-2);
-  border-color: var(--line);
+  border-color: transparent;
 }
 .sidebar .spacer {
   flex: 1;
+}
+
+/* 设置区与导航区之间靠一条分隔线区分，背景保持一致 */
+.sidebar-foot {
+  margin: 0 -12px -16px;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--line);
+}
+.sidebar-foot-label {
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  padding: 0 4px 6px;
+  text-transform: uppercase;
 }
 
 .main {
@@ -177,6 +278,18 @@ label.field > .hint {
   font-size: 12.5px;
   margin-bottom: 22px;
 }
+/* 标题与主操作按钮一行：按钮顶对齐标题，不跟着说明文字往下掉。
+   宽度不设上限，内容随窗口自适应 */
+.page-head {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+.page-head .sub {
+  margin-bottom: 0;
+  line-height: 1.6;
+}
 
 .card {
   background: var(--panel);
@@ -188,6 +301,40 @@ label.field > .hint {
 .card h3 {
   font-size: 14px;
   margin: 0 0 12px;
+}
+
+/* 配置条目：分隔线只画在条目之间，画在每条上面会在卡片顶端多出一道悬空的线 */
+.profile-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 2px;
+}
+.profile-row + .profile-row {
+  border-top: 1px solid var(--line);
+}
+.profile-row .info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.profile-row .meta {
+  font-size: 11.5px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.profile-row .err-text {
+  color: var(--danger);
+  font-size: 11.5px;
+}
+.profile-row .acts {
+  display: flex;
+  gap: 8px;
+  flex: none;
 }
 
 .badge {
@@ -240,17 +387,251 @@ label.field > .hint {
   border-color: var(--danger);
 }
 
-/* 需要人工介入的项目在列表里要一眼看见 */
-.project-row.need-human {
-  background: color-mix(in srgb, var(--branch) 10%, transparent);
-  border-radius: 10px;
-  padding-left: 10px !important;
-  padding-right: 10px !important;
+/* 站点图标：取不到 favicon 时退回域名首字母色块 */
+.site-icon {
+  flex: none;
+  object-fit: contain;
+  background: var(--panel-2);
 }
+.site-icon.fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* 列表自身的显示选项：低视觉优先级，别跟「创建项目」抢注意力 */
+.list-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-size: 11.5px;
+}
+.list-toolbar .grow {
+  flex: 1;
+}
+
+.view-switch {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.view-switch button {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 3px 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+.view-switch button + button {
+  border-left: 1px solid var(--line);
+}
+.view-switch button:hover {
+  color: var(--fg);
+  border-color: transparent;
+}
+.view-switch button.on {
+  background: var(--panel-2);
+  color: var(--fg);
+}
+
+/* 项目列表：整块可点进入。卡片布局重展示，列表布局重密度 */
+.project-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.project-list.card {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  gap: 12px;
+}
+
+.project-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    transform 0.1s;
+}
+/* 卡片布局：图标与内容纵向铺开，删除固定在右上角，不跟着内容高度飘 */
+.project-list.card .project-card {
+  position: relative;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 16px;
+}
+.project-list.card .site-icon {
+  align-self: flex-start;
+}
+.project-list.card .pc-facts {
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.project-list.card .pc-actions {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+}
+.project-card:hover {
+  border-color: var(--accent);
+}
+.project-card:active {
+  transform: translateY(1px);
+}
+.project-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* 需要人工介入的项目要一眼看见 */
+.project-card.need-human {
+  border-color: var(--branch);
+  background: color-mix(in srgb, var(--branch) 8%, var(--panel));
+}
+
+.pc-main {
+  flex: 1;
+  min-width: 0;
+}
+.pc-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+
+/* 列表布局要的是密度：标题、地址、指标压到一行，行高收紧 */
+.project-list.list .project-card {
+  padding: 9px 14px;
+}
+.project-list.list .pc-main {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+.project-list.list .pc-title {
+  margin-bottom: 0;
+  flex: none;
+  max-width: 40%;
+}
+.project-list.list .pc-title strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-list.list .pc-url {
+  margin-bottom: 0;
+  flex: 1;
+  min-width: 0;
+}
+.project-list.list .pc-facts {
+  flex: none;
+  flex-wrap: nowrap;
+  gap: 12px;
+}
+.project-list.list .pc-facts .pc-time {
+  margin-left: 0;
+  min-width: 62px;
+  text-align: right;
+}
+.project-list.list .need-human-tip {
+  display: none;
+}
+.pc-title strong {
+  font-size: 14px;
+}
+.pc-url {
+  font-size: 11.5px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-bottom: 6px;
+}
+/* 事实行：设备、屏数、步数、调用数、时间，等宽排开便于扫读 */
+.pc-facts {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 11.5px;
+  color: var(--muted);
+  flex-wrap: wrap;
+}
+.pc-facts .emoji {
+  margin-right: 3px;
+  font-size: 11px;
+}
+.pc-facts .pc-time {
+  margin-left: auto;
+}
+
+/* 删除是低频破坏性操作：默认几乎隐形，悬停卡片才显出来 */
+.pc-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+.pc-del {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0;
+  transition:
+    opacity 0.15s,
+    color 0.15s,
+    background 0.15s;
+}
+.project-card:hover .pc-del,
+.pc-del:focus-visible {
+  opacity: 1;
+}
+.pc-del:hover {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border-color: transparent;
+}
+.pc-cta {
+  color: var(--branch);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+  animation: dot-pulse 1.6s ease-in-out infinite;
+}
+
 .need-human-tip {
   color: var(--branch);
   font-size: 12px;
-  margin-top: 4px;
+  margin-top: 6px;
 }
 
 /* 侧栏「工作台」上的待办小红点 */
@@ -275,10 +656,34 @@ label.field > .hint {
   }
 }
 
-.emoji {
-  font-family:
-    'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif;
-  font-size: 13px;
-  line-height: 1;
-  margin-right: 5px;
+/* Lucide 图标跟随文字颜色。间距靠 flex 的 gap 统一给，
+   比逐处加 margin 可靠——漏一处就会出现图标和文字贴死的情况 */
+.icon {
+  flex: none;
+}
+
+/* 凡是可能「图标 + 文字」的容器，一律用 inline-flex + gap 排版 */
+button,
+.sidebar nav button,
+.pc-facts > span,
+.badge,
+.state-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+button {
+  justify-content: center;
+}
+.sidebar nav button,
+.theme-trigger,
+.proj-pop-list button,
+.modal-foot button {
+  justify-content: flex-start;
+}
+/* 纯图标按钮不需要 gap 撑开 */
+.view-switch button,
+.pc-del,
+.modal-close {
+  gap: 0;
 }

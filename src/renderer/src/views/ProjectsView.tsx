@@ -1,8 +1,16 @@
 import { useEffect, useState } from 'react'
 import { DEVICE_PRESETS } from '@shared/devices'
 import { CH } from '@shared/ipc-contract'
-import type { AiProfileMasked, ProjectMeta } from '@shared/types'
+import type {
+  AiProfileMasked,
+  ProjectMeta,
+  ProjectRunSummary,
+  SessionSnapshot,
+  SessionState,
+} from '@shared/types'
+import Icon from '../components/Icon'
 import Modal from '../components/Modal'
+import SiteIcon from '../components/SiteIcon'
 import { invoke } from '../ipc'
 import { useApp } from '../state/store'
 import { STATE_LABEL } from './stateLabel'
@@ -11,11 +19,52 @@ interface Props {
   onOpened: () => void
 }
 
+/** 列表要显示的状态：有活动会话就用实时的，否则回落到上次探索的落盘结果 */
+interface StatusView {
+  state: SessionState
+  steps: number
+  screens: number
+  aiCalls: number
+  nodes?: number
+  reason?: string
+}
+
+function liveOrLast(live: SessionSnapshot | null, last?: ProjectRunSummary): StatusView | null {
+  if (live) {
+    return {
+      state: live.state,
+      steps: live.step,
+      screens: live.screens,
+      aiCalls: live.aiCalls,
+      reason: live.reason,
+    }
+  }
+  if (!last) return null
+  return { ...last }
+}
+
+function formatTime(iso: string): string {
+  const d = new Date(iso)
+  const diff = Date.now() - d.getTime()
+  const min = Math.floor(diff / 60000)
+  if (min < 1) return '刚刚'
+  if (min < 60) return `${min} 分钟前`
+  const h = Math.floor(min / 60)
+  if (h < 24) return `${h} 小时前`
+  const day = Math.floor(h / 24)
+  if (day < 7) return `${day} 天前`
+  return d.toLocaleDateString('zh-CN')
+}
+
 export default function ProjectsView({ onOpened }: Props) {
   const [projects, setProjects] = useState<ProjectMeta[]>([])
   const [profiles, setProfiles] = useState<AiProfileMasked[]>([])
   const [defaultGoal, setDefaultGoal] = useState('')
   const [open, setOpen] = useState(false)
+  // 布局偏好记在本地，下次进来还是上次选的
+  const [view, setView] = useState<'card' | 'list'>(
+    () => (localStorage.getItem('ufc.projectView') as 'card' | 'list') ?? 'card'
+  )
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [form, setForm] = useState({ name: '', targetUrl: '', deviceId: DEVICE_PRESETS[0].id, aiProfileId: '', goal: '' })
@@ -30,6 +79,8 @@ export default function ProjectsView({ onOpened }: Props) {
     void invoke(CH.aiProfilesList).then(setProfiles)
     void invoke(CH.settingsGet).then((s) => setDefaultGoal(s.defaultGoal))
   }, [])
+
+  useEffect(() => localStorage.setItem('ufc.projectView', view), [view])
 
   // 后台探索会不断改动项目的更新时间，列表跟着刷新
   useEffect(() => {
@@ -79,6 +130,8 @@ export default function ProjectsView({ onOpened }: Props) {
       alert('该项目正在探索中，请先结束后再删除。')
       return
     }
+    const p = projects.find((x) => x.id === id)
+    if (!confirm(`删除项目「${p?.name ?? id}」？\n工程目录（含全部截图与图谱）会一并删除，且不可恢复。`)) return
     await invoke(CH.projectDelete, { id })
     await reload()
   }
@@ -88,52 +141,114 @@ export default function ProjectsView({ onOpened }: Props) {
 
   return (
     <div className="main">
-      <div className="row" style={{ alignItems: 'flex-start' }}>
+      <div className="page-head">
         <div className="grow">
           <h2>项目</h2>
           <div className="sub">每个项目对应一个待分析的网站，拥有独立的会话分区与图谱工程目录。</div>
         </div>
         <button className="primary" onClick={startCreate}>
+          <Icon name="add" />
           创建项目
         </button>
       </div>
 
-      <div className="card">
-        {projects.length === 0 && <div className="empty">还没有项目，点右上角「创建项目」开始。</div>}
-        {projects.map((p) => {
-          const st = statusOf(p.id)
-          const needHuman = st?.state === 'awaiting_human'
-          return (
-            <div
-              key={p.id}
-              className={`row project-row${needHuman ? ' need-human' : ''}`}
-              style={{ padding: '12px 0', borderTop: '1px solid var(--line)' }}
-            >
-              <div className="grow">
-                <div className="row" style={{ gap: 8 }}>
-                  <strong>{p.name}</strong>
-                  {st && <span className={`state-chip ${st.state}`}>{STATE_LABEL[st.state] ?? st.state}</span>}
-                  {st && (
-                    <span className="muted" style={{ fontSize: 11.5 }}>
-                      {st.step}/{st.budgets.maxSteps} 步 · {st.screens} 屏
+      {projects.length === 0 ? (
+        <div className="card">
+          <div className="empty">还没有项目，点右上角「创建项目」开始。</div>
+        </div>
+      ) : (
+        <>
+          {/* 布局切换属于列表自身的显示选项，放在列表上沿、弱化处理 */}
+          <div className="list-toolbar">
+            <span className="muted">共 {projects.length} 个项目</span>
+            <span className="grow" />
+            <span className="view-switch">
+              <button className={view === 'card' ? 'on' : ''} onClick={() => setView('card')} title="卡片布局">
+                <Icon name="viewCard" size={14} />
+              </button>
+              <button className={view === 'list' ? 'on' : ''} onClick={() => setView('list')} title="列表布局">
+                <Icon name="viewList" size={14} />
+              </button>
+            </span>
+          </div>
+
+          <div className={`project-list ${view}`}>
+            {projects.map((p) => {
+            const live = statusOf(p.id)
+            // 有活动会话就显示实时状态，否则回落到上次探索的落盘结果
+            const status = liveOrLast(live, p.lastRun)
+            const needHuman = status?.state === 'awaiting_human'
+            const device = DEVICE_PRESETS.find((d) => d.id === p.deviceId)
+            return (
+              <div
+                key={p.id}
+                className={`project-card${needHuman ? ' need-human' : ''}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => void openOne(p.id)}
+                onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && void openOne(p.id)}
+                title="点击进入项目"
+              >
+                <SiteIcon url={p.targetUrl} size={view === 'card' ? 30 : 22} />
+
+                <div className="pc-main">
+                  <div className="pc-title">
+                    <strong>{p.name}</strong>
+                    <span className={`state-chip ${status?.state ?? 'idle'}`}>
+                      {status ? STATE_LABEL[status.state] ?? status.state : '未开始'}
                     </span>
-                  )}
+                    {live && <span className="live-dot" title="正在后台运行" />}
+                  </div>
+
+                  <div className="pc-url mono" title={p.targetUrl}>
+                    {p.targetUrl}
+                  </div>
+
+                  <div className="pc-facts">
+                    <span>
+                      <Icon name="device" size={13} />
+                      {device ? device.name : p.deviceId}
+                    </span>
+                    {status && (
+                      <>
+                        <span>
+                          <Icon name="screens" size={13} />
+                          {status.nodes ?? status.screens} 屏
+                        </span>
+                        <span>
+                          <Icon name="steps" size={13} />
+                          {status.steps} 步
+                        </span>
+                        <span>
+                          <Icon name="aiCalls" size={13} />
+                          {status.aiCalls} 次 AI 调用
+                        </span>
+                      </>
+                    )}
+                    <span className="pc-time">{formatTime(p.updatedAt)}</span>
+                  </div>
+
+                  {needHuman && <div className="need-human-tip">需要你介入：{status?.reason}</div>}
                 </div>
-                <div className="muted mono" style={{ fontSize: 11.5 }}>
-                  {p.targetUrl} · {p.deviceId} · 更新于 {new Date(p.updatedAt).toLocaleString('zh-CN')}
+
+                  {/* 整块卡片可点，这里只留破坏性操作，并挡住冒泡免得误入项目 */}
+                  <div className="pc-actions" onClick={(e) => e.stopPropagation()}>
+                    {needHuman && <span className="pc-cta">去处理 ›</span>}
+                    <button
+                      className="pc-del"
+                      onClick={() => void remove(p.id)}
+                      title="删除项目及其图谱工程目录"
+                      aria-label="删除项目"
+                    >
+                      <Icon name="delete" size={14} />
+                    </button>
+                  </div>
                 </div>
-                {needHuman && <div className="need-human-tip">需要你介入：{st?.reason}</div>}
-              </div>
-              <button className={needHuman ? 'primary' : ''} onClick={() => void openOne(p.id)}>
-                {needHuman ? '去处理' : st ? '查看进度' : '打开'}
-              </button>
-              <button className="danger" onClick={() => void remove(p.id)}>
-                删除
-              </button>
-            </div>
-          )
-        })}
-      </div>
+              )
+            })}
+          </div>
+        </>
+      )}
 
       <Modal
         title="创建项目"

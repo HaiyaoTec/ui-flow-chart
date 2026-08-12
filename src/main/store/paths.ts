@@ -9,9 +9,13 @@ export function appDataDir(): string {
   return dir
 }
 
-/** 项目工程根目录：Documents/UIFlowChart/projects */
+/**
+ * 项目工程根目录：Documents/UIFlowChart/projects。
+ * 自动化测试必须指到临时目录，否则会往用户真实的项目列表里塞测试数据。
+ */
 export function projectsRoot(): string {
-  const dir = join(app.getPath('documents'), 'UIFlowChart', 'projects')
+  const base = process.env.UFC_DATA_DIR ?? join(app.getPath('documents'), 'UIFlowChart')
+  const dir = join(base, 'projects')
   ensureDir(dir)
   return dir
 }
