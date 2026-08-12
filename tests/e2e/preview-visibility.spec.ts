@@ -67,12 +67,32 @@ test('弹层展开、面板收起、离开工作台时，原生视图都要让�
       'test:preview-debug'
     )
     expect(full.fit, '选了 100% 就该 1:1 呈现').toBeCloseTo(1, 2)
+
+    // 页面本身不能被缩放，只是被截断：视口仍是设备的逻辑尺寸
+    const page = await ipc<{ iw: number; ih: number; vs: number }>(
+      window,
+      'test:eval-preview',
+      '({ iw: innerWidth, ih: innerHeight, vs: visualViewport.scale })'
+    )
+    expect(page.iw, '裁切不该改变页面视口宽度').toBe(430)
+    expect(page.ih, '裁切不该改变页面视口高度').toBe(932)
+    expect(page.vs, '页面不该被缩放').toBeCloseTo(1, 2)
+
     const side = await window.locator('.ws-side').boundingBox()
     expect(full.bounds.x, '视图不得越过预览列左边界').toBeGreaterThanOrEqual(Math.round(side!.x) - 1)
     expect(full.bounds.x + full.bounds.width, '视图不得越过预览列右边界').toBeLessThanOrEqual(
       Math.round(side!.x + side!.width) + 1
     )
     expect(full.bounds.height, '超出面板的部分应被裁掉').toBeLessThanOrEqual(Math.round(side!.height))
+
+    // 裁切时必须保留设备的顶部与左侧：屏幕占位区的左上角要在舞台内
+    const anchored = await window.evaluate(() => {
+      const s = document.querySelector('.device-frame .screen')!.getBoundingClientRect()
+      const stage = document.querySelector('.preview-stage')!.getBoundingClientRect()
+      return { dx: Math.round(s.left - stage.left), dy: Math.round(s.top - stage.top) }
+    })
+    expect(anchored.dx, '设备左侧不能被切到舞台外').toBeGreaterThanOrEqual(0)
+    expect(anchored.dy, '设备顶部不能被切到舞台外').toBeGreaterThanOrEqual(0)
 
     await window.locator('.zoom-select').click()
     await window.waitForTimeout(400)

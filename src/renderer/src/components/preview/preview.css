@@ -38,16 +38,6 @@
 .pv-head-title {
   color: var(--fg);
 }
-/* 指定倍数被面板尺寸压回去时的说明 */
-.pv-zoom-note {
-  align-self: center;
-  flex: none;
-  font-size: 11.5px;
-  color: var(--branch);
-  font-variant-numeric: tabular-nums;
-  cursor: help;
-}
-
 /* 缩放选择器压成标题条里的轻量控件，不抢标题的视觉层级 */
 .pv-head .zoom-select {
   flex: none;

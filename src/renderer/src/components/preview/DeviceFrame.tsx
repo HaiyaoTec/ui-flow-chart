@@ -52,6 +52,8 @@ export default function DeviceFrame({ device, zoom = 'fit', onScreenRect }: Prop
   const boxRef = useRef<HTMLDivElement>(null)
   const screenRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ width: 0, height: 0 })
+  /** 设备框是否超出可用区。渲染期间读 ref 拿到的是上一帧的尺寸，必须存成状态 */
+  const [overflow, setOverflow] = useState(false)
   const isPhone = device.kind === 'mobile'
 
   const measure = useCallback(() => {
@@ -82,6 +84,9 @@ export default function DeviceFrame({ device, zoom = 'fit', onScreenRect }: Prop
       h = device.height * zoom
     }
     setSize({ width: Math.round(w), height: Math.round(h) })
+    // 装不下时改为左上对齐：居中会把状态栏和页面左边一起切掉，
+    // 而顶部与左侧恰恰是最需要保留的部分
+    setOverflow(w + chrome.x > box.clientWidth || h + chrome.y > box.clientHeight)
   }, [device.kind, device.width, device.height, zoom])
 
   useLayoutEffect(() => {
@@ -149,9 +154,6 @@ export default function DeviceFrame({ device, zoom = 'fit', onScreenRect }: Prop
   // 写死 46px 圆角的话，预览一缩小手机就被「啃」成了圆角矩形。
   // 比例参考真机：iPhone 屏幕圆角约为宽度的 13%，机身边框约 3%。
   const metrics = frameMetrics(device.kind, size.width)
-
-  // 放大到超出可用区时改为左上对齐：居中的话连状态栏都被切掉了
-  const overflow = size.width > 0 && Boolean(boxRef.current) && size.height + CHROME[device.kind].y > (boxRef.current?.clientHeight ?? 0)
 
   return (
     <div className="device-box" ref={boxRef} data-overflow={overflow ? '1' : undefined}>

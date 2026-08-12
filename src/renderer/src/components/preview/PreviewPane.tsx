@@ -94,9 +94,7 @@ export default function PreviewPane({ initialUrl = '', deviceId: boundDeviceId, 
   const onScreenRect = useCallback(
     (rect: { x: number; y: number; width: number; height: number; scale: number }) => {
       // 显示比例取自 scale 而不是裁切后的宽度，否则放大到超出面板时会算小
-      const dev = getDevice(deviceIdRef.current)
-      setShownWidth(rect.scale * dev.width)
-      setCropped(rect.width < Math.round(dev.width * rect.scale) - 1 || rect.height < Math.round(dev.height * rect.scale) - 1)
+      setShownWidth(rect.scale * getDevice(deviceIdRef.current).width)
       const key = `${rect.x},${rect.y},${rect.width},${rect.height},${rect.scale.toFixed(4)}`
       if (key === lastRect.current) return
       lastRect.current = key
@@ -154,9 +152,6 @@ export default function PreviewPane({ initialUrl = '', deviceId: boundDeviceId, 
   // 缩放＝屏幕实际显示宽度 ÷ 设备逻辑宽度，与主进程下发给 CDP 的 scale 同源
   const actual = shownWidth > 0 ? shownWidth / device.width : 0
   const zoomText = actual > 0 ? `${Math.round(actual * 100)}%` : ''
-  // 指定倍数按真实比例呈现，装不下就裁切。得说一声，否则用户以为设备被截断是 bug
-  const [cropped, setCropped] = useState(false)
-  const zoomCropped = typeof zoom === 'number' && cropped
 
   async function changeDevice(id: string) {
     setDeviceId(id)
@@ -179,11 +174,6 @@ export default function PreviewPane({ initialUrl = '', deviceId: boundDeviceId, 
         </button>
         {open && (
           <>
-            {zoomCropped && (
-              <span className="pv-zoom-note" title="按真实比例呈现，超出面板的部分未显示。拉宽预览列、放大窗口或改用自适应可以看到完整设备">
-                部分裁切
-              </span>
-            )}
             <Select
               className="zoom-select"
               value={String(zoom)}
