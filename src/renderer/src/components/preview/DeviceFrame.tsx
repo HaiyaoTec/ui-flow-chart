@@ -57,18 +57,46 @@ export default function DeviceFrame({ device, onScreenRect }: Props) {
     return () => ro.disconnect()
   }, [measure])
 
-  // 尺寸定下来后把屏幕的视口矩形上报给主进程
+  /**
+   * 把屏幕占位区的视口矩形上报给主进程。
+   *
+   * 关键点：原生视图是按窗口坐标摆放的，所以**位置**变化和尺寸变化一样要上报。
+   * 而 ResizeObserver 只在尺寸变化时触发——右侧面板是固定宽度列，窗口变宽时
+   * 它只平移不改尺寸，观察器一声不吭，视图就会留在原地，看起来像是错位。
+   * 因此除了尺寸观察，还要盯着位置变化。
+   */
   useEffect(() => {
     const el = screenRef.current
     if (!el || size.width === 0) return
+
+    let last = ''
     const report = () => {
       const r = el.getBoundingClientRect()
-      onScreenRect({ x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) })
+      if (r.width < 80 || r.height < 80) return
+      const rect = {
+        x: Math.round(r.x),
+        y: Math.round(r.y),
+        width: Math.round(r.width),
+        height: Math.round(r.height),
+      }
+      const key = `${rect.x},${rect.y},${rect.width},${rect.height}`
+      if (key === last) return
+      last = key
+      onScreenRect(rect)
     }
+
     report()
-    // 布局在同一帧内可能还会微调，下一帧再报一次
     const raf = requestAnimationFrame(report)
-    return () => cancelAnimationFrame(raf)
+    window.addEventListener('resize', report)
+    // 低频兜底：面板平移、侧栏折叠、滚动等都不会触发 ResizeObserver，
+    // 这里只在矩形真的变了才发 IPC，代价可以忽略
+    const timer = window.setInterval(report, 200)
+
+    return () => {
+      cancelAnimationFrame(raf)
+      window.removeEventListener('resize', report)
+      window.clearInterval(timer)
+    }
   }, [size, onScreenRect, device.id])
 
   return (

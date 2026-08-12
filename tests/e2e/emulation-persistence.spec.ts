@@ -97,6 +97,68 @@ test('跨源导航来回切换，模拟不得失效', async () => {
   }
 })
 
+test('窗口缩放导致面板平移时，视图位置必须跟上', async () => {
+  // 必须在工作台里测：那里预览是固定 460px 列，窗口变宽时它只平移、尺寸不变，
+  // ResizeObserver 对这种情况一声不吭。若只依赖它，原生视图会留在原地，
+  // 看起来就是「屏幕错位」。（真机预览页的预览列是 1fr，尺寸会变，测不出这个问题。）
+  const profile = await ipc<{ id: string }>(window, 'ai:profiles:save', {
+    profile: { id: '', name: '位置回归', protocol: 'openai', baseUrl: 'http://localhost:1/v1', model: 'mock' },
+    apiKey: 'k',
+  })
+  const project = await ipc<{ id: string }>(window, 'project:create', {
+    name: '位置回归',
+    targetUrl: `${TEST_SITE}/ua-echo.html`,
+    deviceId: 'iphone-14-pro-max',
+    aiProfileId: profile.id,
+    goal: 'x',
+  })
+  await window.locator('.sidebar').getByRole('button', { name: /项目/ }).click()
+  await window.waitForTimeout(500)
+  await window.getByRole('button', { name: '打开' }).first().click()
+  await window.waitForTimeout(1000)
+  // 固定到「画布为主」，即 1fr + 460px 的固定宽列
+  await window.getByRole('button', { name: '画布为主' }).click()
+  await ipc(window, 'preview:navigate', { url: `${TEST_SITE}/ua-echo.html` })
+  await window.waitForTimeout(1800)
+
+  const rectOf = () =>
+    window.evaluate(() => {
+      const el = document.querySelector('.device-frame .screen') as HTMLElement
+      const r = el.getBoundingClientRect()
+      return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) }
+    })
+  const viewBounds = () =>
+    ipc<{ bounds: { x: number; y: number; width: number; height: number } }>(window, 'test:preview-debug').then(
+      (d) => d.bounds
+    )
+
+  const before = await rectOf()
+  await ipc(window, 'test:resize-window', { dw: 260, dh: 0 })
+  // 给兜底轮询留出时间
+  await window.waitForTimeout(1500)
+
+  const after = await rectOf()
+  expect(after.x, '面板应随窗口变宽而右移').toBeGreaterThan(before.x)
+
+  const b = await viewBounds()
+  // 原生视图必须落在占位区内（居中，允许取整误差）
+  const dx = Math.abs(b.x - (after.x + (after.w - b.width) / 2))
+  const dy = Math.abs(b.y - (after.y + (after.h - b.height) / 2))
+  expect(dx, `视图 x=${b.x} 应贴合占位区 x=${after.x}`).toBeLessThanOrEqual(2)
+  expect(dy, `视图 y=${b.y} 应贴合占位区 y=${after.y}`).toBeLessThanOrEqual(2)
+
+  await ipc(window, 'test:resize-window', { dw: -260, dh: 0 })
+  await window.waitForTimeout(1200)
+
+  // 收拾现场，别影响后面的用例
+  await window.locator('.sidebar').getByRole('button', { name: /项目/ }).click()
+  await window.waitForTimeout(400)
+  await ipc(window, 'project:delete', { id: project.id })
+  await ipc(window, 'ai:profiles:delete', { id: profile.id })
+  await window.locator('.sidebar').getByRole('button', { name: /真机预览/ }).click()
+  await window.waitForTimeout(600)
+})
+
 test('异常小的占位矩形要被丢弃，不能把视图摆到设备框外', async () => {
   await ipc(window, 'preview:set-device', { deviceId: 'iphone-14-pro-max' })
   await ipc(window, 'preview:navigate', { url: `${TEST_SITE}/ua-echo.html` })

@@ -138,14 +138,14 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     shell.showItemInFolder(path)
   })
 
-  registerTestHooks()
+  registerTestHooks(getWindow)
 }
 
 /**
  * 测试专用通道，只有设置 UFC_TEST=1 才注册。
  * 用于在自动化里读取预览页内部状态、模拟人工操作，生产运行时完全不存在。
  */
-function registerTestHooks(): void {
+function registerTestHooks(getWindow: () => BrowserWindow | null): void {
   if (process.env.UFC_TEST !== '1') return
 
   ipcMain.handle('test:eval-preview', async (_e, script: string) =>
@@ -165,4 +165,11 @@ function registerTestHooks(): void {
   ipcMain.handle('test:wait-stable', async () => preview.driver.waitStable())
   ipcMain.handle('test:graph', async (_e, projectId: string) => loadGraph(projectId))
   ipcMain.handle('test:preview-debug', async () => preview.debugInfo())
+  ipcMain.handle('test:resize-window', async (_e, d: { dw: number; dh: number }) => {
+    const w = getWindow()
+    if (!w) return null
+    const b = w.getBounds()
+    w.setBounds({ ...b, width: b.width + d.dw, height: b.height + d.dh })
+    return w.getBounds()
+  })
 }

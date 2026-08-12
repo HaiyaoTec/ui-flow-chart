@@ -46,7 +46,8 @@ export class PreviewManager {
       this.driver.create(this.win, partition, device)
       this.driver.setCallbacks({
         onNav: () => this.emitNav(),
-        onNavigated: () => void this.syncViewport(),
+        // 跨进程导航可能换掉渲染帧，覆盖要整套重放，不能只挪视图
+        onNavigated: () => void this.syncViewport(true),
         onCrash: () => this.handleCrash(),
       })
       trace('spin up renderer')
@@ -77,7 +78,8 @@ export class PreviewManager {
   async setDevice(device: DeviceSpec): Promise<void> {
     this.device = device
     if (!this.driver.attached) return
-    await this.syncViewport()
+    // 换设备必须重放全部 override，即使缩放恰好没变
+    await this.syncViewport(true)
     await this.driver.reload()
     this.emitNav()
   }
@@ -102,13 +104,17 @@ export class PreviewManager {
   }
 
   /** 串行下发，且 scale 与 bounds 取自同一快照 */
-  private syncViewport(): Promise<void> {
+  private syncViewport(force = false): Promise<void> {
     this.applyChain = this.applyChain
       .then(async () => {
         if (!this.driver.attached || this.opening) return
         const pane = this.pane
         const fit = computeFitScale(this.device, pane)
-        await this.driver.applyDevice(this.device, fit)
+        // 面板只是平移时缩放没变，没必要重发 Emulation 命令去打扰页面，
+        // 挪一下视图即可；拖拽调窗口大小时这条路径会被高频命中
+        if (force || Math.abs(fit - this.driver.currentScale()) > 0.0005) {
+          await this.driver.applyDevice(this.device, fit)
+        }
         this.applyBounds(pane, fit)
       })
       .catch(() => {
