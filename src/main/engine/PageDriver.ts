@@ -93,11 +93,22 @@ export class PageDriver implements IPageDriver {
         webSecurity: true,
       },
     })
-    this.rawView = view
     // 「视图已改尺寸、页面还没出帧」那块用这个颜色填充。
     // 这里是手机屏幕区，黑色与关着的设备屏幕一致，不突兀
     view.setBackgroundColor('#000000')
-    win.contentView.addChildView(view)
+    // 挂载成功之后才认领：窗口已销毁时 addChildView 会抛，
+    // 先赋值的话这个没挂上、又还活着的视图就再没人回收了
+    try {
+      win.contentView.addChildView(view)
+    } catch (e) {
+      try {
+        view.webContents.close()
+      } catch {
+        /* 忽略 */
+      }
+      throw e
+    }
+    this.rawView = view
     view.setBounds(this.bounds)
 
     const wc = view.webContents

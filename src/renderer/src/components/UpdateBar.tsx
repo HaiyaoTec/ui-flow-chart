@@ -56,9 +56,19 @@ export default function UpdateBar() {
           <span className="grow">
             有新版本 <strong>{st.version}</strong> 可用
           </span>
-          <button className="link-btn" onClick={() => void invoke(CH.updateDownload)}>
-            下载
-          </button>
+          {/* 未签名的 mac 包装不了下载来的更新，只能引导到 Release 页 */}
+          {st.manualOnly ? (
+            <button
+              className="link-btn"
+              onClick={() => void invoke(CH.shellOpenExternal, { url: st.downloadUrl ?? '' })}
+            >
+              去下载
+            </button>
+          ) : (
+            <button className="link-btn" onClick={() => void invoke(CH.updateDownload)}>
+              下载
+            </button>
+          )}
         </>
       )}
       {st.phase === 'downloading' && (

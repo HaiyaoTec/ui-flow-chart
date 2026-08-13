@@ -29,6 +29,25 @@ win:
   # 再或临时把这项设为 false（产出的 exe 会是 Electron 默认图标）。
   signAndEditExecutable: true
 
+mac:
+  category: public.app-category.developer-tools
+  # dmg 供手动下载安装；zip 是 electron-updater 在 macOS 上唯一能用的更新包格式，
+  # 现在虽然没开自动更新（见下），也一并产出，将来接上时不用再改发布流程
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+    - target: zip
+      arch: [x64, arm64]
+  # 512×512 的 png，electron-builder 会自动转成 icns
+  icon: build/icon.png
+  # 暂不做代码签名与公证：需要 Apple Developer Program（99 USD/年）。
+  # 后果与 Windows 侧不同，是功能级而非提示级——
+  # 1) Gatekeeper 会拦首次打开，用户要手动去掉隔离属性（README 有命令）；
+  # 2) Squirrel.Mac 校验运行中应用的签名，未签名一律无法应用内更新，
+  #    所以 macOS 版在更新界面上直接标为「不支持应用内更新」，引导去 Release 页下载。
+  extendInfo:
+    NSDocumentsFolderUsageDescription: 用于读写导出的流程图与截图文件
+
 nsis:
   oneClick: false
   perMachine: false # 单用户安装，免 UAC 弹窗

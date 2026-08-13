@@ -9,6 +9,29 @@ import './modal.css'
  */
 const openStack: symbol[] = []
 
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
+function focusables(root: HTMLElement): HTMLElement[] {
+  return [...root.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.offsetParent !== null)
+}
+
+/** Tab 焦点陷阱：弹窗是模态的，焦点跑到底下的界面上就成了「看得见按不着」 */
+function trapTab(root: HTMLElement | null, e: KeyboardEvent): void {
+  if (!root) return
+  const list = focusables(root)
+  if (list.length === 0) return
+  const first = list[0]
+  const last = list[list.length - 1]
+  const active = document.activeElement
+  if (e.shiftKey && (active === first || !root.contains(active))) {
+    e.preventDefault()
+    last.focus()
+  } else if (!e.shiftKey && (active === last || !root.contains(active))) {
+    e.preventDefault()
+    first.focus()
+  }
+}
+
 interface Props {
   title: string
   subtitle?: string
@@ -38,13 +61,16 @@ export default function Modal({
 }: Props) {
   const idRef = useRef<symbol | null>(null)
   idRef.current ??= Symbol('modal')
+  const cardRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!open) return
     const id = idRef.current as symbol
     openStack.push(id)
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && openStack[openStack.length - 1] === id) onClose()
+      if (openStack[openStack.length - 1] !== id) return
+      if (e.key === 'Escape') return onClose()
+      if (e.key === 'Tab') trapTab(cardRef.current, e)
     }
     document.addEventListener('keydown', onKey)
     return () => {
@@ -54,11 +80,37 @@ export default function Modal({
     }
   }, [open, onClose])
 
+  /*
+   * 打开时把焦点移进来。
+   *
+   * 不移的话焦点还停在触发弹窗的那个后台按钮上：回车会把它再按一遍——
+   * 删除项目那种场景就是又弹一次确认框，而先前那个 Promise 永远挂着。
+   * 落点优先取标了 autoFocus 的元素，其次是第一个可聚焦控件。
+   */
+  useEffect(() => {
+    if (!open) return
+    const card = cardRef.current
+    if (!card) return
+    const prev = document.activeElement as HTMLElement | null
+    // 表单里的 autoFocus 在提交阶段就生效了，比这里早，别把它抢走
+    if (!card.contains(document.activeElement)) {
+      const list = focusables(card)
+      const target =
+        card.querySelector<HTMLElement>('[data-autofocus]') ??
+        // 关闭按钮排在最前，但它不该是默认落点
+        list.find((el) => !el.classList.contains('modal-close')) ??
+        list[0]
+      target?.focus()
+    }
+    return () => prev?.focus?.()
+  }, [open])
+
   if (!open) return null
 
   return (
     <div className="modal-mask" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div
+        ref={cardRef}
         className={`modal${chrome === 'panel' ? ' modal-panel' : ''}`}
         style={{ width, height }}
         role="dialog"

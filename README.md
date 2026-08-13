@@ -4,15 +4,34 @@ AI 驱动的网站功能路径分析工具。填入 AI 接口与目标网址，A
 
 ## 安装
 
-到 [Releases](../../releases) 下载 `Flow Chart-x.y.z-setup.exe`。
+到 [Releases](../../releases) 下载对应平台的安装包：Windows 用 `Flow Chart-x.y.z-setup.exe`，
+macOS 用 `Flow Chart-x.y.z-arm64.dmg`（Apple Silicon）或 `Flow Chart-x.y.z.dmg`（Intel）。
 
-安装包目前**未做代码签名**，Windows 会提示「未知发布者」，需要点「更多信息 → 仍要运行」。介意的话可以先核对 SHA256（每个 Release 的说明里都附了）：
+两个平台的安装包目前都**未做代码签名**，但后果不同。
+
+**Windows**：首次安装会提示「未知发布者」，点「更多信息 → 仍要运行」即可。介意的话可以先核对 SHA256（每个 Release 的说明里都附了）：
 
 ```bash
 certutil -hashfile "Flow Chart-0.1.0-setup.exe" SHA256
 ```
 
 应用会自动检查更新（可在设置里关掉），新版本从 GitHub Release 下载，重启后生效；探索进行中不会自动重启。
+
+**macOS**：Gatekeeper 会拦下首次打开，提示「已损坏」或「无法验证开发者」。把 app 拖进「应用程序」后执行一次：
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Flow Chart.app"
+```
+
+校验 SHA256：
+
+```bash
+shasum -a 256 "Flow Chart-0.1.0-arm64.dmg"
+```
+
+macOS 版**不支持应用内更新**：Squirrel.Mac 要校验运行中应用的代码签名，未签名一律装不上。
+应用仍会检查新版本并在界面上提示，但下载与安装需要到 Release 页手动完成。
+后续接入 Apple Developer ID 签名与公证后会恢复完整的更新链路。
 
 ## 从源码运行
 
@@ -33,7 +52,7 @@ npm run dev
 | --- | --- |
 | AI 接口 | 内置 OpenAI 兼容与 Anthropic Messages 两种协议，自定义 Base URL / 模型 / 附加请求头 |
 | 凭证安全 | API Key 经系统安全存储加密落盘，界面与 IPC 只出掩码 |
-| 设备模拟 | iPhone 14 Pro Max / iPhone SE / Pixel 7 / iPad / 桌面多档，UA、视口、DPR、触摸、客户端提示一并模拟 |
+| 设备模拟 | iPhone / Android / PC 端 / 平板四类共 40 余款预设（含折叠屏各形态），UA、视口、DPR、触摸、客户端提示一并模拟 |
 | 真机预览 | 设备外框内实时交互预览，可切设备、导航、后退刷新 |
 | 自动探索 | AI 每步看截图 + 控件清单决定下一步，逐屏命名、建边、标注操作类型 |
 | 人工接管 | AI 卡住或你主动接手时转为被动录制，界面每变化一次自动截图入库 |
@@ -49,17 +68,24 @@ npm run dev          # 开发模式
 npm run build        # 类型检查 + 三端构建
 npm test             # 单元测试（vitest）
 npm run test:e2e     # 端到端测试（Playwright 驱动 Electron）
-npm run selfcheck    # 引擎自检：设备模拟、输入坐标、截图、探针
+npm run selfcheck    # 引擎自检：设备模拟、输入坐标、截图、探针（仅 Windows）
 npm run test-site    # 单独起内置测试站
 npm run mock-ai      # 单独起 mock AI 服务
 ```
 
-全流程自检（测试站 + mock AI + 一整轮探索，全离线）：
+全流程自检（测试站 + mock AI + 一整轮探索，全离线，跨平台）：
 
 ```bash
-powershell -File scripts/explore-check.ps1            # 注册流程
-powershell -File scripts/explore-check.ps1 takeover   # 登录 → 验证码 → 人工接管
-powershell -File scripts/explore-check.ps1 badjson    # AI 输出坏 JSON 的降级路径
+npm run explore-check            # 注册流程
+npm run explore-check takeover   # 登录 → 验证码 → 人工接管
+npm run explore-check badjson    # AI 输出坏 JSON 的降级路径
+```
+
+打包：
+
+```bash
+npm run dist         # Windows 安装包（NSIS），只能在 Windows 上执行
+npm run dist:mac     # macOS dmg + zip（x64 与 arm64），只能在 macOS 上执行
 ```
 
 ## 架构

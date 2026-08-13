@@ -4,6 +4,13 @@ import { CH, type EventChannel, type IpcEventMap, type IpcInvokeMap, type Invoke
 const EVENT_CHANNELS: EventChannel[] = [CH.evSession, CH.evGraphPatch, CH.evPreviewNav, CH.evWatchShot, CH.evUpdateState]
 
 const api = {
+  /**
+   * 运行平台。
+   *
+   * 界面上有几处必须按平台分叉，且都发生在首屏之前（滚动条样式），
+   * 走 IPC 拿会晚一帧，所以直接从预加载同步暴露。
+   */
+  platform: process.platform,
   invoke<C extends InvokeChannel>(channel: C, payload?: IpcInvokeMap[C]['req']): Promise<IpcInvokeMap[C]['res']> {
     return ipcRenderer.invoke(channel, payload)
   },

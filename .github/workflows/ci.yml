@@ -7,7 +7,11 @@ on:
 
 jobs:
   check:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-14]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -15,13 +19,22 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+        env:
+          # 类型检查与单测都不启动 Electron，省掉每次 100MB 出头的二进制下载
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
       - run: npm run typecheck
       - run: npm test
 
-  # E2E 要真实窗口与 GPU，跑得慢，只在主干上跑
+  # E2E 要真实窗口与 GPU，跑得慢，只在主干上跑。
+  # 两个平台都跑：预览是 BaseWindow + WebContentsView + CDP 那一套，
+  # 平台差异只有真跑起来才看得见
   e2e:
     if: github.event_name == 'push'
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-14]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -29,11 +42,20 @@ jobs:
         with:
           node-version: 20
           cache: npm
+      # Electron 二进制不在 npm 缓存里，单独缓存一份
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~\AppData\Local\electron\Cache
+          key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
+          restore-keys: ${{ runner.os }}-electron-
       - run: npm ci
       - run: npm run build
       - run: npx playwright test
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: playwright-report
+          # v4 起产物重名会直接失败
+          name: playwright-report-${{ matrix.os }}
           path: test-results

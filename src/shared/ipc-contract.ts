@@ -57,6 +57,7 @@ export const CH = {
   exportHtml: 'export:html',
   exportPng: 'export:png',
   shellReveal: 'shell:reveal',
+  shellOpenExternal: 'shell:open-external',
 
   // 主 → 渲染 事件
   evSession: 'session:event',
@@ -66,7 +67,13 @@ export const CH = {
   evUpdateState: 'update:state',
 } as const
 
-/** 应用内更新的状态。busy 表示探索会话正占着预览，此时不能重启安装 */
+/**
+ * 应用内更新的状态。
+ *
+ * busy 表示探索会话正占着预览，此时不能重启安装。
+ * manualOnly 表示这个安装包只能手动更新（未签名的 macOS 包即是）：
+ * 检查新版本照常，但下载与安装由用户到 Release 页自行完成。
+ */
 export interface UpdateState {
   phase: 'idle' | 'checking' | 'up-to-date' | 'available' | 'downloading' | 'downloaded' | 'error'
   version: string
@@ -75,6 +82,9 @@ export interface UpdateState {
   error: string
   currentVersion?: string
   busy?: boolean
+  manualOnly?: boolean
+  /** manualOnly 时给出的下载页地址 */
+  downloadUrl?: string
 }
 
 export interface Bounds {
@@ -182,6 +192,8 @@ export interface IpcInvokeMap {
   [CH.exportHtml]: { req: { projectId: string }; res: ExportResult }
   [CH.exportPng]: { req: { projectId: string; scale?: number }; res: ExportResult }
   [CH.shellReveal]: { req: { path: string }; res: void }
+  /** 只放行 http/https，其余协议一律拒绝 */
+  [CH.shellOpenExternal]: { req: { url: string }; res: void }
 }
 
 /** 主 → 渲染 事件类型映射 */

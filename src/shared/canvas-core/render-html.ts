@@ -92,7 +92,7 @@ export function renderHtml(graph: FlowGraph, opts: RenderOptions): string {
   --muted:#5d6577;--line:#d8dbe4;--accent:#18995a;--branch:#c46a10;--back:#3b6dd8;--link:#8a5c86}
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--fg);
-  font:14px/1.5 "PingFang SC","Microsoft YaHei",-apple-system,Segoe UI,sans-serif}
+  font:14px/1.5 -apple-system,BlinkMacSystemFont,Segoe UI,"PingFang SC","Microsoft YaHei",sans-serif}
 ${CANVAS_CSS}
 #ufc-bar{position:fixed;left:12px;top:12px;right:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;
   padding:9px 12px;border-radius:12px;background:color-mix(in srgb,var(--panel) 88%,transparent);

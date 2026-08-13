@@ -33,11 +33,23 @@ electron-updater 接入、数据迁移框架）。唯一没做的是第七节第
 - `publish.provider: github` 不写 owner/repo：CI 与本地都从 git remote 推断，fork 后无需改配置
 - `releaseType: draft`：产物先进草稿，人工确认齐全再 Publish，避免半成品被用户拉走
 
-**产物**：`Flow Chart-1.2.3-setup.exe`、`latest.yml`（更新元数据，必须一并发布）、以及可选的 `*.zip` 便携版。
+- `mac.target` 同时出 dmg 与 zip，各含 x64 与 arm64：dmg 供手动下载，zip 是 electron-updater 在 macOS 上唯一能用的更新包格式
+- `mac.icon` 直接给 512×512 的 png，electron-builder 自己转 icns，不必另存一份 `.icns`
+
+**产物**：
+
+| 平台 | 文件 |
+|---|---|
+| Windows | `Flow Chart-1.2.3-setup.exe`、`latest.yml`（更新元数据，必须一并发布） |
+| macOS | `Flow Chart-1.2.3.dmg`、`Flow Chart-1.2.3-arm64.dmg`、对应的两个 `.zip`、`latest-mac.yml` |
+
+**macOS 的双架构必须在同一次 electron-builder 调用里出齐**（`--mac --x64 --arm64`）：`latest-mac.yml` 不带架构后缀，两次调用会互相覆盖，只剩一个架构的条目——另一半用户要么拿不到更新（Intel 端直接报 `ERR_UPDATER_ZIP_FILE_NOT_FOUND`），要么被塞一个跑在 Rosetta 下的包。
+
+**mac 目标只能在 macOS 主机上打**：electron-builder 在其他平台构建 mac 目标会直接抛 `Build for macOS is supported only on macOS`。
 
 **本地打包的一个坑**：`signAndEditExecutable: true`（给 exe 写图标与版本信息）会让 electron-builder 解压 winCodeSign 工具包，包里含 macOS 的符号链接。Windows 未开「开发者模式」时创建符号链接需要管理员权限，本地 `npm run dist` 会卡在解压这一步；CI 的 runner 有该权限，不受影响。本地要打包就先开开发者模式，或用管理员终端跑一次把缓存落地。
 
-**关键约束**：`latest.yml` 是 electron-updater 的唯一事实源，缺了它自动更新就不工作。
+**关键约束**：`latest.yml` / `latest-mac.yml` 是 electron-updater 的唯一事实源，缺了它自动更新就不工作。
 
 ---
 
@@ -48,22 +60,40 @@ electron-updater 接入、数据迁移框架）。唯一没做的是第七节第
 ```yaml
 # .github/workflows/release.yml 要点
 on: { push: { tags: ['v*'] } }
+permissions: { contents: write }          # 顶层声明，矩阵作业一并继承
 jobs:
-  release:
-    runs-on: windows-latest
-    permissions: { contents: write }      # 创建 Release 需要
+  build:
+    strategy:
+      fail-fast: false
+      max-parallel: 1                     # 串行：并行时两个作业可能各建一个同名标签的草稿
+      matrix:
+        include:
+          - { os: windows-latest, args: --win --x64 }
+          - { os: macos-14, args: --mac --x64 --arm64 }
+    runs-on: ${{ matrix.os }}
     steps:
       - actions/checkout
       - actions/setup-node (node 20, cache npm)
+      - 校对标签与 package.json 版本      # 放在 npm ci 之前，对不上就别浪费时间拉依赖
       - npm ci
-      - npm run typecheck && npm test     # 单元测试进流水线；E2E 需要窗口环境，另设 workflow
-      - npx electron-builder --win --publish always
-        env: { GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} }
+      - npm test                          # 单元测试进流水线；E2E 需要窗口环境，另设 workflow
+      - npm run build                     # electron-builder 只装 out/，构建得自己先做
+      - npx electron-builder ${{ matrix.args }} --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false   # mac 暂不签名，免得找不到证书就中断
 ```
 
 版本号唯一来源是 `package.json`，标签只是触发器。建议脚本化：`npm version patch && git push --follow-tags`。
 
-**发布流程**：先发 **draft release**（`--publish always` 会自动建），人工确认产物齐全（`setup.exe` + `latest.yml`）后再点 Publish。草稿状态下 electron-updater 不会看到它，避免半成品被用户拉走。
+**发布流程**：先发 **draft release**（`--publish always` 会自动建），人工确认产物齐全后再点 Publish。草稿状态下 electron-updater 不会看到它，避免半成品被用户拉走。
+
+人工确认清单：
+
+- Windows：`setup.exe` + `latest.yml`
+- macOS：两个 `.dmg`（x64 / arm64）+ 两个 `.zip` + `latest-mac.yml`，且 `latest-mac.yml` 里两个架构的条目都在
+
+`--mac --x64 --arm64` 产出的 `latest-mac.yml` 中 arm64 的 dmg 条目会重复出现一次（electron-builder 已知问题，对 electron-updater 无影响，它取 zip），核对时不要误判为构建失败。
 
 ---
 
@@ -80,6 +110,8 @@ jobs:
 | 启动后 30 秒 | 静默检查（避开冷启动的资源竞争） |
 | 之后每 4 小时 | 静默检查 |
 | 设置 →「软件更新」里点「检查更新」 | 手动检查，无论结果都给反馈 |
+
+macOS 上「检查」照常，但**下载与安装被关掉**（`UpdateState.manualOnly`），界面改为引导到 Release 页手动下载。原因见第五节。
 
 ### 状态机
 
@@ -109,7 +141,11 @@ available → downloading → downloaded → 等待重启
 
 ## 五、代码签名（需要你决策）
 
-未签名的 Windows 安装包会触发 SmartScreen「未知发布者」警告，首次安装需用户点「更多信息 → 仍要运行」。三个选项：
+两个平台不签名的代价不是一个量级：Windows 是提示级，macOS 是功能级。
+
+### Windows
+
+未签名的安装包会触发 SmartScreen「未知发布者」警告，首次安装需用户点「更多信息 → 仍要运行」。三个选项：
 
 | 方案 | 成本 | 效果 |
 |---|---|---|
@@ -117,7 +153,22 @@ available → downloading → downloaded → 等待重启
 | OV 证书 | 约 ¥1000+/年 | 仍需积累 SmartScreen 信誉，前期仍可能告警 |
 | EV 证书 | 约 ¥2500+/年，需硬件密钥 | 立即通过 SmartScreen，但 CI 签名要额外配置（云 HSM） |
 
-**建议**：起步不签名，在 README 与首个 Release 说明里写清楚校验方式（提供 SHA256），用户量起来后再上 EV。
+**当前决策**：不签名，README 与 Release 说明里给出 SHA256 校验方式，用户量起来后再上 EV。
+
+### macOS
+
+未签名的后果有两条独立链路：
+
+1. **Gatekeeper**：dmg 里的 app 拖进「应用程序」后首次打开会被拦，提示「已损坏」或「无法验证开发者」，用户要手动执行 `xattr -dr com.apple.quarantine`。Apple Silicon 更硬——arm64 二进制必须带签名才能执行，而 electron-builder 在没有证书时是完全跳过签名、不会退化成 ad-hoc 签名。
+2. **应用内更新**：安装由 Squirrel.Mac 承担，它要先取运行中应用的代码签名再校验新包是否满足同一 designated requirement，未签名一律失败。失败形态还很有迷惑性：错误在 `dispatchUpdateDownloaded` 之前抛出，界面会停在「新版本已就绪」，点重启毫无反应。
+
+**当前决策**：macOS 定位为「自动检查、手动更新」。
+
+- `UpdateState.manualOnly` 标记这类安装包，界面上不出现「下载 / 重启更新」，改为「打开 Release 页」；主进程侧 `download()` 与 `install()` 也各兜一道，见 `src/main/updater.ts`
+- 检查照常进行——用户仍需要知道有没有新版本
+- CI 打包步骤设 `CSC_IDENTITY_AUTO_DISCOVERY: false`，避免 mac 作业因找不到证书而中断
+
+要恢复完整链路，需要 Apple Developer Program（99 USD/年）：拿到 Developer ID Application 证书后，`electron-builder.yml` 的 mac 段补 `hardenedRuntime: true` 与 entitlements、接 notarytool 公证，release.yml 注入 `CSC_LINK`/`CSC_KEY_PASSWORD`/`APPLE_ID`/`APPLE_APP_SPECIFIC_PASSWORD`/`APPLE_TEAM_ID` 并去掉 `CSC_IDENTITY_AUTO_DISCOVERY: false`，最后把 `updater.ts` 里的 `manualOnly()` 改回 false。
 
 ---
 

@@ -6,11 +6,35 @@ on:
   push:
     tags: ['v*']
 
+# 顶层声明即可，矩阵作业一并继承
+permissions:
+  contents: write # 创建 Release、上传产物
+
 jobs:
-  windows:
-    runs-on: windows-latest
-    permissions:
-      contents: write # 创建 Release、上传产物
+  build:
+    strategy:
+      fail-fast: false
+      # 串行执行：两个作业同时 --publish 有概率各建一个同名标签的草稿 Release
+      max-parallel: 1
+      matrix:
+        include:
+          - os: windows-latest
+            args: --win --x64
+            artifact: windows-installer
+            files: |
+              release/*.exe
+              release/latest.yml
+          # mac 的两个架构必须在同一次调用里出齐：latest-mac.yml 不带架构后缀，
+          # 拆成两个作业的话后完成的那个会把先完成的整份覆盖掉，
+          # 于是另一半用户的更新链路直接断掉
+          - os: macos-14
+            args: --mac --x64 --arm64
+            artifact: macos-installer
+            files: |
+              release/*.dmg
+              release/*.zip
+              release/latest-mac.yml
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -18,16 +42,17 @@ jobs:
           node-version: 20
           cache: npm
 
-      - run: npm ci
-      - run: npm test
-
-      # 标签必须与 package.json 的版本一致，否则自动更新会对不上号
+      # 标签必须与 package.json 的版本一致，否则自动更新会对不上号。
+      # 放在 npm ci 之前：对不上时不必先花两分钟拉依赖
       - name: 校对标签与版本
         shell: pwsh
         run: |
           $pkg = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $tag = "${{ github.ref_name }}".TrimStart('v')
           if ($pkg -ne $tag) { throw "package.json 是 $pkg，标签是 $tag，请先对齐" }
+
+      - run: npm ci
+      - run: npm test
 
       # electron-builder 只负责把 out/ 装进安装包，构建得自己先做——
       # 少了这一步会以「找不到入口文件 out/main/index.js」失败。
@@ -42,23 +67,24 @@ jobs:
             if (-not (Test-Path $f)) { throw "缺少构建产物：$f" }
           }
 
-      # --publish always 会把 setup.exe 与 latest.yml 一起传到草稿 Release。
-      # latest.yml 是 electron-updater 的唯一事实源，缺了它应用内更新就不工作。
+      # --publish always 会把安装包与 latest*.yml 一起传到草稿 Release。
+      # latest.yml / latest-mac.yml 是 electron-updater 的唯一事实源。
       - name: 打包并发布草稿
-        run: npx electron-builder --win --publish always
+        run: npx electron-builder ${{ matrix.args }} --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # mac 侧暂不签名，关掉证书自动发现，否则找不到证书会直接中断打包
+          CSC_IDENTITY_AUTO_DISCOVERY: false
 
       - name: 输出校验值
         shell: pwsh
         run: |
-          Get-ChildItem release/*.exe | ForEach-Object {
+          Get-ChildItem release -Include *.exe, *.dmg, *.zip -Recurse | ForEach-Object {
             "$($_.Name)  $((Get-FileHash $_.FullName -Algorithm SHA256).Hash)"
           }
 
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-installer
-          path: |
-            release/*.exe
-            release/latest.yml
+          # v4 起同一次运行里产物重名会直接失败，名字必须带上平台
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.files }}

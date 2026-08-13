@@ -50,21 +50,29 @@
 
 /* 滚动条：细、圆、常态几乎不显形，悬停才加深。
    注意不能再写 scrollbar-width / scrollbar-color——Chromium 里一旦用了这两个
-   标准属性，整套 ::-webkit-scrollbar 规则就被忽略，退回带上下箭头的系统样式。 */
-::-webkit-scrollbar {
+   标准属性，整套 ::-webkit-scrollbar 规则就被忽略，退回带上下箭头的系统样式。
+
+   只在 Windows 上自绘：macOS 的系统滚动条是覆盖式的（不占布局宽度、滚动时才显形），
+   写了 ::-webkit-scrollbar 的宽度就会被降级成常驻占位的滚动条，与系统习惯不符。
+   选择器要把根元素自身与其后代并列写，否则 html 自己的滚动条不受这套规则管。 */
+:root[data-platform='win32']::-webkit-scrollbar,
+:root[data-platform='win32'] ::-webkit-scrollbar {
   width: 12px;
   height: 12px;
 }
-::-webkit-scrollbar-track {
+:root[data-platform='win32']::-webkit-scrollbar-track,
+:root[data-platform='win32'] ::-webkit-scrollbar-track {
   background: transparent;
 }
 /* 两端的步进箭头一律不要：只保留一条可拖的滑块 */
-::-webkit-scrollbar-button {
+:root[data-platform='win32']::-webkit-scrollbar-button,
+:root[data-platform='win32'] ::-webkit-scrollbar-button {
   display: none;
   width: 0;
   height: 0;
 }
-::-webkit-scrollbar-thumb {
+:root[data-platform='win32']::-webkit-scrollbar-thumb,
+:root[data-platform='win32'] ::-webkit-scrollbar-thumb {
   /* 用 muted 调淡而不是直接用 --line：浅色主题下 --line 太浅，滑块几乎看不见 */
   background: color-mix(in srgb, var(--muted) 42%, transparent);
   border-radius: 999px;
@@ -72,11 +80,13 @@
   border: 3.5px solid transparent;
   background-clip: padding-box;
 }
-::-webkit-scrollbar-thumb:hover {
+:root[data-platform='win32']::-webkit-scrollbar-thumb:hover,
+:root[data-platform='win32'] ::-webkit-scrollbar-thumb:hover {
   background: var(--muted);
   background-clip: padding-box;
 }
-::-webkit-scrollbar-corner {
+:root[data-platform='win32']::-webkit-scrollbar-corner,
+:root[data-platform='win32'] ::-webkit-scrollbar-corner {
   background: transparent;
 }
 
@@ -104,7 +114,10 @@ body,
   height: 100%;
   background: var(--bg);
   color: var(--fg);
-  font: 14px/1.6 'PingFang SC', 'Microsoft YaHei', -apple-system, 'Segoe UI', sans-serif;
+  /* 西文字体排在中文之前：字体匹配是逐字符按顺序来的，PingFang SC 自带西文与数字字形，
+     排在最前会把拉丁字母和数字全接过去，SF Pro / Segoe UI 根本轮不到——
+     顺带把 tabular-nums 也废掉了（PingFang 没有等宽数字） */
+  font: 14px/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   overflow: hidden;
 }
 

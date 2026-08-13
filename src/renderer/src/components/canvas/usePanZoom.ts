@@ -127,12 +127,22 @@ export function usePanZoom(stageRef: React.RefObject<HTMLDivElement | null>, wor
       drag.current = null
       stage.classList.remove('grabbing')
     }
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === ' ') {
-        spaceDown.current = true
-        e.preventDefault()
-      }
+    /*
+     * 空格是画布的平移修饰键，但监听挂在 window 上，输入框里的空格也会冒泡上来。
+     * 不判来源就 preventDefault 的话，工作台里的地址栏、AI 配置弹窗都打不出空格，
+     * 复选框的空格切换也一并失效。
+     */
+    const editable = (t: EventTarget | null): boolean => {
+      const el = t as HTMLElement | null
+      return !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(el.tagName))
     }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== ' ' || editable(e.target)) return
+      spaceDown.current = true
+      e.preventDefault()
+    }
+    // 抬起一律清位：按下时在画布、松开时焦点已经跑到输入框的话，
+    // 加了同样的守卫就会把 spaceDown 永久留在 true
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.key === ' ') spaceDown.current = false
     }

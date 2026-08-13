@@ -24,6 +24,11 @@ class SessionManager {
     this.win = win
   }
 
+  /** 窗口关闭时置空，等下一个窗口绑上来。不置空的话事件会一直发往已销毁的窗口 */
+  unbindWindow(win: BaseWindow): void {
+    if (this.win === win) this.win = null
+  }
+
   private send(channel: string, payload: unknown): void {
     // 界面自己也是一个 WebContentsView，事件要发给它而不是窗口
     if (this.win && !this.win.isDestroyed()) getUiContents()?.send(channel, payload)

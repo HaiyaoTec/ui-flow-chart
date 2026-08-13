@@ -59,11 +59,8 @@ function withStore<T>(projectId: string, fn: (s: GraphStore) => T): T {
 }
 
 export function registerIpc(getWindow: () => BaseWindow | null): void {
-  const win = getWindow()
-  if (win) {
-    preview.bindWindow(win)
-    sessions.bindWindow(win)
-  }
+  // 窗口绑定不在这里做：ipcMain.handle 只能注册一次，而窗口可以重建
+  // （macOS 关窗不退出进程，从 Dock 再打开是新窗口）。绑定见 index.ts 的 bindWindow。
 
   /* ------------------------------- 设置与凭证 ------------------------------- */
   handle(CH.settingsGet, () => getSettings())
@@ -177,6 +174,11 @@ export function registerIpc(getWindow: () => BaseWindow | null): void {
   handle(CH.exportPng, ({ projectId, scale }) => exportProjectPng(projectId, scale))
   handle(CH.shellReveal, ({ path }) => {
     shell.showItemInFolder(path)
+  })
+  handle(CH.shellOpenExternal, ({ url }) => {
+    // 只放行 http/https：file: 与自定义协议交给系统打开等于把本机能力开给页面
+    if (!/^https?:\/\//i.test(url)) throw new Error('只允许打开 http/https 链接')
+    void shell.openExternal(url)
   })
 
   registerTestHooks(getWindow)

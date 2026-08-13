@@ -1,5 +1,7 @@
 import { join } from 'node:path'
 import { app, BaseWindow, nativeTheme } from 'electron'
+import { preview } from './engine/previewManager'
+import { sessions } from './engine/sessionManager'
 import { registerIpc } from './ipc/registry'
 import { registerUfcProtocol, registerUfcSchemePrivileges } from './protocol'
 import { getSettings, migrateSettings } from './store/settings'
@@ -27,6 +29,23 @@ if (!singleInstance) {
 } else {
   let mainWindow: BaseWindow | null = null
 
+  /**
+   * 把预览与会话绑到当前窗口上。
+   *
+   * 每建一个窗口都要绑一次：macOS 上关窗不退出进程，从 Dock 再打开是新窗口，
+   * 只在启动时绑一次的话，之后预览会挂在已销毁的窗口上——表现是打开项目后
+   * 预览区永久空白、会话事件全丢，而且异常被吞掉，界面上看不出任何报错。
+   */
+  const bindWindow = (w: BaseWindow): void => {
+    preview.bindWindow(w)
+    sessions.bindWindow(w)
+    w.once('closed', () => {
+      preview.unbindWindow(w)
+      sessions.unbindWindow(w)
+      if (mainWindow === w) mainWindow = null
+    })
+  }
+
   app.on('second-instance', () => {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore()
@@ -42,6 +61,7 @@ if (!singleInstance) {
     if (migrateError) console.error('[migrate]', migrateError)
     nativeTheme.themeSource = getSettings().theme
     mainWindow = createMainWindow()
+    bindWindow(mainWindow)
     registerIpc(() => mainWindow)
     void updater.start()
 
@@ -66,8 +86,11 @@ if (!singleInstance) {
       return
     }
 
+    // macOS：Dock 图标被点、且一个窗口都不剩时重新开窗
     app.on('activate', () => {
-      if (BaseWindow.getAllWindows().length === 0) mainWindow = createMainWindow()
+      if (BaseWindow.getAllWindows().length > 0) return
+      mainWindow = createMainWindow()
+      bindWindow(mainWindow)
     })
   })
 

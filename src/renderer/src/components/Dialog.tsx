@@ -61,8 +61,17 @@ export function DialogProvider({ children }: { children: ReactNode }) {
         footer={
           <>
             <span className="grow" />
-            {opts?.kind === 'confirm' && <button onClick={() => close(false)}>{opts?.cancelText ?? '取消'}</button>}
-            <button className={opts?.danger ? 'danger-solid' : 'primary'} onClick={() => close(true)}>
+            {/* 默认落点给安全的那个按钮：破坏性操作聚焦「取消」，回车不该直接把东西删掉 */}
+            {opts?.kind === 'confirm' && (
+              <button data-autofocus={opts?.danger ? '' : undefined} onClick={() => close(false)}>
+                {opts?.cancelText ?? '取消'}
+              </button>
+            )}
+            <button
+              className={opts?.danger ? 'danger-solid' : 'primary'}
+              data-autofocus={opts?.danger ? undefined : ''}
+              onClick={() => close(true)}
+            >
               {opts?.confirmText ?? '确定'}
             </button>
           </>

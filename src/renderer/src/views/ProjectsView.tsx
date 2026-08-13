@@ -72,13 +72,28 @@ export default function ProjectsView({ onOpened }: Props) {
   )
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [listError, setListError] = useState('')
   const [form, setForm] = useState({ name: '', targetUrl: '', deviceId: DEVICE_PRESETS[0].id, aiProfileId: '', goal: '' })
 
   const openProject = useApp((s) => s.openProject)
   const session = useApp((s) => s.session)
   const dialog = useDialog()
 
-  const reload = async () => setProjects(await invoke(CH.projectList))
+  /*
+   * 列表拉取失败要说出来。
+   *
+   * 早先是 void reload() 不接错误：工程目录没有访问权限时（macOS 拒绝过
+   * 「文件与文件夹」授权就是这种情况）只会是一个未捕获的 Promise rejection，
+   * 用户看到的是一个正常的空列表，完全不知道出了什么事。
+   */
+  const reload = async () => {
+    try {
+      setProjects(await invoke(CH.projectList))
+      setListError('')
+    } catch (e) {
+      setListError(e instanceof Error ? e.message : String(e))
+    }
+  }
 
   useEffect(() => {
     void reload()
@@ -164,7 +179,11 @@ export default function ProjectsView({ onOpened }: Props) {
         </button>
       </div>
 
-      {projects.length === 0 ? (
+      {listError ? (
+        <div className="card">
+          <div className="empty">读取项目列表失败：{listError}</div>
+        </div>
+      ) : projects.length === 0 ? (
         <div className="card">
           <div className="empty">还没有项目，点右上角「创建项目」开始。</div>
         </div>

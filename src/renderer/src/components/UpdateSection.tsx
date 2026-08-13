@@ -49,17 +49,27 @@ export default function UpdateSection({ embedded = false }: { embedded?: boolean
             )}
           </div>
           <div className="meta">
-            {st?.phase === 'error' ? st.error : '通过 GitHub Release 分发，更新包由应用自行下载与校验。'}
+            {st?.phase === 'error'
+              ? st.error
+              : st?.manualOnly
+                ? '当前安装包未经代码签名，无法应用内更新；检查到新版本后请到 Release 页手动下载。'
+                : '通过 GitHub Release 分发，更新包由应用自行下载与校验。'}
           </div>
         </div>
         <div className="acts">
-          {st?.phase === 'available' && (
+          {st?.manualOnly && (
+            <button onClick={() => void invoke(CH.shellOpenExternal, { url: st.downloadUrl ?? '' })}>
+              <Icon name="open" />
+              打开 Release 页
+            </button>
+          )}
+          {!st?.manualOnly && st?.phase === 'available' && (
             <button onClick={() => void invoke(CH.updateDownload)}>
               <Icon name="download" />
               下载
             </button>
           )}
-          {st?.phase === 'downloaded' && (
+          {!st?.manualOnly && st?.phase === 'downloaded' && (
             <button className="primary" disabled={st.busy} title={st.busy ? '探索进行中，结束后才能重启' : ''} onClick={() => void invoke(CH.updateInstall, {})}>
               重启更新
             </button>
@@ -80,15 +90,18 @@ export default function UpdateSection({ embedded = false }: { embedded?: boolean
             />
             自动检查新版本
           </label>
-          <label className="seg" style={{ marginLeft: 8 }}>
-            <input
-              type="checkbox"
-              checked={settings.autoDownloadUpdate}
-              disabled={!settings.autoCheckUpdate}
-              onChange={(e) => void patch({ autoDownloadUpdate: e.target.checked })}
-            />
-            后台自动下载（不会自动重启）
-          </label>
+          {/* 只能手动更新的包没有「后台下载」可言，开关直接不给 */}
+          {!st?.manualOnly && (
+            <label className="seg" style={{ marginLeft: 8 }}>
+              <input
+                type="checkbox"
+                checked={settings.autoDownloadUpdate}
+                disabled={!settings.autoCheckUpdate}
+                onChange={(e) => void patch({ autoDownloadUpdate: e.target.checked })}
+              />
+              后台自动下载（不会自动重启）
+            </label>
+          )}
         </>
       )}
     </div>

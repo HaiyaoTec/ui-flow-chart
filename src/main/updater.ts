@@ -9,6 +9,23 @@ import { getUiContents } from './window'
 const FIRST_CHECK_DELAY = 30_000
 const CHECK_INTERVAL = 4 * 60 * 60 * 1000
 
+const RELEASE_PAGE = 'https://github.com/HaiyaoTec/ui-flow-chart/releases/latest'
+
+/**
+ * 这个安装包只能手动更新。
+ *
+ * macOS 的安装由 Squirrel.Mac 承担，它要先取运行中应用的代码签名、再校验新包是否
+ * 满足同一 designated requirement；本项目的 mac 包未签名（需要 Apple Developer
+ * Program），这一步必失败。失败形态还特别有迷惑性：错误在 dispatchUpdateDownloaded
+ * 之前抛出，界面会停在「新版本已就绪」，点重启却毫无反应。
+ *
+ * 所以 macOS 上只关掉「下载 + 重启安装」，检查照常——用户仍需要知道有没有新版本，
+ * 只是改由 Release 页手动下载。签名之后把这里改回 false 即可恢复完整链路。
+ */
+function manualOnly(): boolean {
+  return process.platform === 'darwin'
+}
+
 /**
  * 应用内更新。
  *
@@ -24,7 +41,13 @@ class Updater {
   private started = false
 
   current(): UpdateState {
-    return { ...this.state, currentVersion: app.getVersion(), busy: this.sessionBusy() }
+    return {
+      ...this.state,
+      currentVersion: app.getVersion(),
+      busy: this.sessionBusy(),
+      manualOnly: manualOnly(),
+      downloadUrl: RELEASE_PAGE,
+    }
   }
 
   /** 会话占着预览时不能重启：探索会中断，页面登录态也会丢 */
@@ -64,7 +87,7 @@ class Updater {
         notes: typeof info.releaseNotes === 'string' ? info.releaseNotes : '',
         error: '',
       })
-      if (getSettings().autoDownloadUpdate) void this.download()
+      if (!manualOnly() && getSettings().autoDownloadUpdate) void this.download()
     })
     up.on('update-not-available', () => this.emit({ phase: 'up-to-date', error: '' }))
     up.on('download-progress', (p) => this.emit({ phase: 'downloading', percent: Math.round(p.percent) }))
@@ -97,6 +120,8 @@ class Updater {
   }
 
   async download(): Promise<UpdateState> {
+    // 未签名的 mac 包下载下来也装不上，界面上本就不给下载按钮，这里再兜一道
+    if (manualOnly()) return this.current()
     const up = await this.api()
     if (!up || this.state.phase === 'downloading' || this.state.phase === 'downloaded') return this.current()
     this.emit({ phase: 'downloading', percent: 0, error: '' })
@@ -115,6 +140,10 @@ class Updater {
    * 界面据此把按钮置灰并说明原因；用户执意要装时才带 force。
    */
   async install(force: boolean): Promise<UpdateState> {
+    if (manualOnly()) {
+      this.emit({ error: '当前安装包不支持应用内更新，请到 Release 页下载新版本' })
+      return this.current()
+    }
     if (this.state.phase !== 'downloaded') return this.current()
     // 先判会话再取 api：顺序反了的话，开发模式会在这里直接返回，
     // 用户永远看不到「为什么装不了」

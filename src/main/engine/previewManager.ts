@@ -35,12 +35,34 @@ export class PreviewManager {
   private paneFresh = false
   /** 视口同步的串行队列 */
   private applyChain: Promise<void> = Promise.resolve()
+  /** 解绑当前窗口 resize 监听的函数 */
+  private offResize: (() => void) | null = null
 
+  /**
+   * 绑定主窗口。
+   *
+   * macOS 上关窗不退出进程，从 Dock 再打开会新建一个窗口，因此这里必须支持换绑：
+   * 早先只在启动时绑一次，重建后预览挂在已销毁的窗口上，表现是「预览区永久空白」。
+   * 监听也要能解绑，否则每换一次窗口就多挂一个 resize。
+   */
   bindWindow(win: BaseWindow): void {
-    this.win = win
+    if (this.win === win) return
+    this.offResize?.()
     // 拖窗口边框时原生视图跟不上，右侧会拖出一条黑边。
     // 缩放期间先藏起来，等渲染进程报来新矩形再显示。
-    win.on('resize', () => this.holdUntilPane())
+    const onResize = (): void => this.holdUntilPane()
+    win.on('resize', onResize)
+    this.offResize = () => win.off('resize', onResize)
+    this.win = win
+  }
+
+  /** 窗口关闭时调用：子视图不随窗口销毁，必须显式释放，否则页面留在后台继续跑 */
+  unbindWindow(win: BaseWindow): void {
+    if (this.win !== win) return
+    this.offResize?.()
+    this.offResize = null
+    this.driver.destroy()
+    this.win = null
   }
 
   getDevice(): DeviceSpec {
