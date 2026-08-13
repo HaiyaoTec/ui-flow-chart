@@ -29,6 +29,12 @@ interface Props {
   overlay?: boolean
   /** 动作型菜单用：触发器固定显示这个文案，而不是当前选中项 */
   triggerLabel?: string
+  /**
+   * 没有任何选项时，弹层里给一条去创建的入口。
+   *
+   * 空下拉展开后是一个空盒子，用户只知道「没得选」，不知道该去哪儿加。
+   */
+  emptyAction?: { label: string; hint?: string; onSelect: () => void }
 }
 
 /**
@@ -49,6 +55,7 @@ export default function Select({
   className,
   overlay = false,
   triggerLabel,
+  emptyAction,
 }: Props) {
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(0)
@@ -73,6 +80,12 @@ export default function Select({
     if (v !== value) onChange(v)
   }
 
+  function runEmptyAction() {
+    if (!emptyAction) return
+    toggle(false)
+    emptyAction.onSelect()
+  }
+
   // 定位：优先向下展开，下方放不开就翻到上方
   useLayoutEffect(() => {
     if (!open) return setRect(null)
@@ -80,7 +93,8 @@ export default function Select({
       const el = triggerRef.current
       if (!el) return
       const b = el.getBoundingClientRect()
-      const wanted = Math.min(options.length * 38 + 10, 320)
+      // 没有选项时弹层里放的是空态与创建入口，按两行算高度
+      const wanted = Math.min(Math.max(options.length, 2) * 38 + 10, 320)
       const below = window.innerHeight - b.bottom - 8
       const drop = below < wanted && b.top > below ? 'up' : 'down'
       // 触发器可能被挤得很窄（预览工具栏），弹层得给选项留出可读宽度
@@ -107,12 +121,14 @@ export default function Select({
     }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') return toggle(false)
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      // 空列表时上下键无处可去，回车则落到创建入口上
+      if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && options.length > 0) {
         e.preventDefault()
         setActive((i) => (i + (e.key === 'ArrowDown' ? 1 : options.length - 1)) % options.length)
       }
       if (e.key === 'Enter') {
         e.preventDefault()
+        if (options.length === 0) return runEmptyAction()
         const o = options[active]
         if (o) pick(o.value)
       }
@@ -157,6 +173,15 @@ export default function Select({
                 : { bottom: window.innerHeight - rect.top, maxHeight: `${rect.top - 10}px` }),
             }}
           >
+            {options.length === 0 && (
+              <div className="ufc-select-empty">{emptyAction?.hint ?? '暂无可选项'}</div>
+            )}
+            {options.length === 0 && emptyAction && (
+              <button type="button" className="ufc-select-add" onClick={runEmptyAction}>
+                <Icon name="add" size={14} />
+                <span className="val">{emptyAction.label}</span>
+              </button>
+            )}
             {options.map((o, i) => (
               <button
                 key={o.value}

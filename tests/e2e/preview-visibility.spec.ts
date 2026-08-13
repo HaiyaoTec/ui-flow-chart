@@ -1,5 +1,9 @@
 import { expect, test } from '@playwright/test'
+import { getDevice } from '../../src/shared/devices'
 import { ipc, launchApp, openFirstProject, startTestSite, TEST_SITE } from './helpers'
+
+/** 项目建出来时用的那台 430×932 机型，改设备清单后名字会变，从预设表里取 */
+const WIDE_IPHONE = getDevice('iphone-14-pro-max').name
 
 /**
  * 原生视图的可见性回归。
@@ -85,16 +89,16 @@ test('弹层展开、面板收起、离开工作台时，原生视图都要让�
      */
     await window.locator('.preview-toolbar .ufc-select').click()
     await window.waitForTimeout(400)
-    await expect(window.locator('.ufc-select-pop'), '弹层应当渲染出来').toBeVisible()
+    await expect(window.locator('.device-pop'), '弹层应当渲染出来').toBeVisible()
     expect(await visible(window), '弹层展开时不该再隐藏视图').toBe(true)
-    await window.locator('.ufc-select-pop button', { hasText: 'iPhone SE' }).click()
+    await window.locator('.device-pop .models button', { hasText: 'iPhone SE' }).click()
     await window.waitForTimeout(2000)
     const afterPick = await ipc<{ device: { width: number } }>(window, 'test:preview-debug')
     expect(afterPick.device.width, '选中的设备应当生效').toBe(375)
 
     await window.locator('.preview-toolbar .ufc-select').click()
     await window.waitForTimeout(400)
-    await window.locator('.ufc-select-pop button', { hasText: 'iPhone 14 Pro Max' }).click()
+    await window.locator('.device-pop .models button', { hasText: WIDE_IPHONE }).click()
     await window.waitForTimeout(2000)
 
     // 2. 收起「模拟设备」整块
@@ -187,7 +191,7 @@ test('弹层展开、面板收起、离开工作台时，原生视图都要让�
     // 4. 换过设备再回项目列表——这里曾经留下一块浮在列表上的白色色块
     await window.locator('.preview-toolbar .ufc-select').click()
     await window.waitForTimeout(400)
-    await window.locator('.ufc-select-pop button', { hasText: 'iPhone SE' }).click()
+    await window.locator('.device-pop .models button', { hasText: 'iPhone SE' }).click()
     await window.waitForTimeout(1800)
     await window.locator('.proj-trigger').click()
     await window.waitForTimeout(400)

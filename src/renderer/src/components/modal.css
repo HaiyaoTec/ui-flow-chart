@@ -62,6 +62,18 @@
   color: var(--fg);
   background: var(--panel-2);
 }
+/* 面板式弹窗没有标题栏，关闭按钮浮在右上角 */
+.modal-panel {
+  overflow: hidden;
+  position: relative;
+}
+.modal-close.floating {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  z-index: 1;
+  margin: 0;
+}
 
 /* 确认框正文：保留换行，行距放宽一点 */
 .dialog-msg {

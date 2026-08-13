@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import Icon, { type IconName } from './Icon'
-import Modal from './Modal'
-import AiSettingsPanel from './AiSettingsPanel'
-import UpdateSection from './UpdateSection'
+import SettingsModal, { type SettingsSection } from './SettingsModal'
 import { useTheme, type Theme } from './useTheme'
 import './settings-menu.css'
 
@@ -15,14 +13,14 @@ const THEMES: Array<{ value: Theme; label: string; icon: IconName }> = [
 /**
  * 左下角的统一设置入口。
  *
- * 三项设置（主题、AI 接口、软件更新）都收在这里：主题项就地展开子菜单，
- * 另外两项内容太多，塞进菜单会挤，改为开弹窗。
+ * 主题就地向右展开子菜单，选完直接生效；AI 接口与软件更新内容多，
+ * 进的是同一个两栏设置面板，菜单项只决定进去停在哪一栏。
  * 这样侧边栏导航只留「做事」的入口（项目、真机预览），配置类的都归到角落里。
  */
 export default function SettingsMenu({ compact = false }: { compact?: boolean }) {
   const [open, setOpen] = useState(false)
   const [sub, setSub] = useState<'' | 'theme'>('')
-  const [modal, setModal] = useState<'' | 'ai' | 'update'>('')
+  const [panel, setPanel] = useState<SettingsSection | ''>('')
   const boxRef = useRef<HTMLDivElement>(null)
   const [theme, pickTheme] = useTheme()
 
@@ -68,39 +66,45 @@ export default function SettingsMenu({ compact = false }: { compact?: boolean })
 
         {open && (
           <div className="settings-pop" role="menu">
-            {/* 主题：就地展开子菜单，选完直接生效，不必再确认 */}
-            <button
-              className={`row${sub === 'theme' ? ' on' : ''}`}
-              onClick={() => setSub((v) => (v === 'theme' ? '' : 'theme'))}
-              aria-haspopup="menu"
-              aria-expanded={sub === 'theme'}
-            >
-              <Icon name={current.icon} />
-              <span className="grow">主题</span>
-              <span className="hint">{current.label}</span>
-              <Icon name={sub === 'theme' ? 'caretDown' : 'caretRight'} size={14} />
-            </button>
-            {sub === 'theme' && (
-              <div className="settings-sub" role="menu">
-                {THEMES.map((t) => (
-                  <button
-                    key={t.value}
-                    role="menuitemradio"
-                    aria-checked={theme === t.value}
-                    className={theme === t.value ? 'row on' : 'row'}
-                    onClick={() => void pickTheme(t.value)}
-                  >
-                    <Icon name={t.icon} />
-                    <span className="grow">{t.label}</span>
-                  </button>
-                ))}
-              </div>
-            )}
+            {/* 主题：向右展开子菜单，选完直接生效，不必再确认 */}
+            <div className="settings-item" onMouseEnter={() => setSub('theme')}>
+              <button
+                className={`row${sub === 'theme' ? ' on' : ''}`}
+                onClick={() => setSub('theme')}
+                aria-haspopup="menu"
+                aria-expanded={sub === 'theme'}
+              >
+                <Icon name={current.icon} />
+                <span className="grow">主题</span>
+                <span className="hint">{current.label}</span>
+                <Icon name="caretRight" size={14} />
+              </button>
+              {sub === 'theme' && (
+                <div className="settings-sub" role="menu">
+                  {THEMES.map((t) => (
+                    <button
+                      key={t.value}
+                      role="menuitemradio"
+                      aria-checked={theme === t.value}
+                      className={theme === t.value ? 'row on' : 'row'}
+                      onClick={() => void pickTheme(t.value)}
+                    >
+                      <Icon name={t.icon} />
+                      <span className="grow">{t.label}</span>
+                      {theme === t.value && <Icon name="check" size={14} className="tick" />}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
 
+            {/* 指到别的项就收起子菜单——菜单与触发项之间留了间隙，
+                靠移入其他项来关闭比靠移出来关闭稳，斜着走过去不会中途消失 */}
             <button
               className="row"
+              onMouseEnter={() => setSub('')}
               onClick={() => {
-                setModal('ai')
+                setPanel('ai')
                 close()
               }}
             >
@@ -111,8 +115,9 @@ export default function SettingsMenu({ compact = false }: { compact?: boolean })
 
             <button
               className="row"
+              onMouseEnter={() => setSub('')}
               onClick={() => {
-                setModal('update')
+                setPanel('update')
                 close()
               }}
             >
@@ -124,19 +129,7 @@ export default function SettingsMenu({ compact = false }: { compact?: boolean })
         )}
       </div>
 
-      <Modal
-        title="AI 接口设置"
-        subtitle="配置用于分析网站的 AI 模型。API Key 经系统安全存储加密后保存在本地，不会出现在界面与日志里。"
-        open={modal === 'ai'}
-        onClose={() => setModal('')}
-        width={820}
-      >
-        <AiSettingsPanel />
-      </Modal>
-
-      <Modal title="软件更新" open={modal === 'update'} onClose={() => setModal('')} width={640}>
-        <UpdateSection embedded />
-      </Modal>
+      <SettingsModal open={panel !== ''} section={panel || 'ai'} onClose={() => setPanel('')} />
     </>
   )
 }

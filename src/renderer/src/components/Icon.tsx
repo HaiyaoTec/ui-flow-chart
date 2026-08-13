@@ -1,5 +1,6 @@
 import {
   ArrowLeft,
+  Check,
   CheckCheck,
   ChevronDown,
   ChevronRight,
@@ -69,6 +70,8 @@ const ICONS = {
   themeLight: Sun,
   themeDark: Moon,
   themeSystem: Monitor,
+  /** 单选项的选中标记 */
+  check: Check,
   caretDown: ChevronDown,
   caretRight: ChevronRight,
   caretUp: ChevronUp,

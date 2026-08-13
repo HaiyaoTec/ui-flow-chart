@@ -1,0 +1,80 @@
+.settings-panel {
+  display: flex;
+  min-height: 0;
+  height: 100%;
+}
+
+/* 左栏：板块导航，通到弹窗上下边 */
+.settings-rail {
+  flex: none;
+  width: 190px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 10px;
+  background: var(--panel-2);
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+}
+.rail-title {
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  text-transform: uppercase;
+  padding: 4px 8px 8px;
+}
+.settings-rail button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border-color: transparent;
+  border-radius: var(--ctl-r);
+  min-height: var(--ctl-h);
+  padding: 0 9px;
+  font-size: 13px;
+}
+.settings-rail button .icon {
+  flex: none;
+  color: var(--muted);
+}
+.settings-rail button .grow {
+  flex: 1;
+  min-width: 0;
+}
+.settings-rail button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--fg) 7%, var(--panel-2));
+}
+/* 选中态与侧边栏导航同一套：低饱和强调底，不换边框 */
+.settings-rail button.on {
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+.settings-rail button.on .icon {
+  color: var(--accent);
+}
+
+/* 右栏：板块内容，自己滚动 */
+.settings-content {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 18px 20px 20px;
+}
+.settings-content .section-head {
+  /* 关闭按钮浮在右上角，标题给它让出位置 */
+  padding-right: 34px;
+  margin-bottom: 14px;
+}
+.settings-content .section-head h3 {
+  margin: 0;
+  font-size: 15px;
+}
+.settings-content .section-sub {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 3px;
+  line-height: 1.6;
+}

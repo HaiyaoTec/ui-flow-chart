@@ -4,11 +4,16 @@
 
 /* ------------------------------- 设备与目标 ------------------------------- */
 
+/** 设备选择菜单的分类 */
+export type DeviceCategory = 'iphone' | 'android' | 'pc' | 'tablet'
+
 export interface DeviceSpec {
   id: string
-  /** 展示名，如「iPhone 14 Pro Max」 */
+  /** 展示名，如「iPhone 16 Pro」 */
   name: string
   kind: 'mobile' | 'tablet' | 'desktop'
+  /** 归到哪个分类下；自定义设备没有，按 kind 归并 */
+  category?: DeviceCategory
   /** CSS 像素视口 */
   width: number
   height: number

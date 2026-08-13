@@ -84,6 +84,19 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 空态：先说清为什么没得选，再给一条去创建的入口 */
+.ufc-select-empty {
+  padding: 8px 10px 6px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.ufc-select-pop button.ufc-select-add {
+  color: var(--accent);
+}
+.ufc-select-pop button.ufc-select-add .icon {
+  flex: none;
+}
 .ufc-select-pop .check {
   flex: none;
   color: var(--accent);

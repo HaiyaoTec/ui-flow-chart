@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { DEVICE_PRESETS, getDevice } from '@shared/devices'
 import { CH, type NavState, type PreviewDiagnosis } from '@shared/ipc-contract'
 import { invoke, on } from '../../ipc'
+import DevicePicker from '../DevicePicker'
 import Icon from '../Icon'
 import Select from '../Select'
 import DeviceFrame from './DeviceFrame'
@@ -244,17 +245,12 @@ export default function PreviewPane({
       </div>
 
       <div className="preview-toolbar">
-        <Select
+        <DevicePicker
           className="device-select"
           value={deviceId}
           disabled={busy}
           onChange={(id) => void changeDevice(id)}
-          options={DEVICE_PRESETS.map((d) => ({
-            value: d.id,
-            label: d.name,
-            hint: `${d.width}×${d.height}@${d.deviceScaleFactor}x`,
-          }))}
-          // 这两个下拉压在原生视图上，走系统菜单，不再需要藏视图
+          // 弹层压在原生视图上，展开期间把界面视图提到最上层
           overlay
         />
         <input

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { DEVICE_PRESETS } from '@shared/devices'
+import { DEVICE_PRESETS, getDevice } from '@shared/devices'
 import { CH } from '@shared/ipc-contract'
 import type {
   AiProfileMasked,
@@ -8,10 +8,12 @@ import type {
   SessionSnapshot,
   SessionState,
 } from '@shared/types'
+import DevicePicker from '../components/DevicePicker'
 import { useDialog } from '../components/Dialog'
 import Icon from '../components/Icon'
 import Modal from '../components/Modal'
 import Select from '../components/Select'
+import SettingsModal from '../components/SettingsModal'
 import SiteIcon from '../components/SiteIcon'
 import { invoke } from '../ipc'
 import { useApp } from '../state/store'
@@ -63,6 +65,7 @@ export default function ProjectsView({ onOpened }: Props) {
   const [profiles, setProfiles] = useState<AiProfileMasked[]>([])
   const [defaultGoal, setDefaultGoal] = useState('')
   const [open, setOpen] = useState(false)
+  const [aiOpen, setAiOpen] = useState(false)
   // 布局偏好记在本地，下次进来还是上次选的
   const [view, setView] = useState<'card' | 'list'>(
     () => (localStorage.getItem('ufc.projectView') as 'card' | 'list') ?? 'card'
@@ -187,7 +190,8 @@ export default function ProjectsView({ onOpened }: Props) {
             // 有活动会话就显示实时状态，否则回落到上次探索的落盘结果
             const status = liveOrLast(live, p.lastRun)
             const needHuman = status?.state === 'awaiting_human'
-            const device = DEVICE_PRESETS.find((d) => d.id === p.deviceId)
+            // 走 getDevice 而不是直接 find：老项目里存的是改版前的设备 id
+            const device = getDevice(p.deviceId)
             return (
               <div
                 key={p.id}
@@ -299,15 +303,7 @@ export default function ProjectsView({ onOpened }: Props) {
         <div className="row" style={{ alignItems: 'flex-start' }}>
           <label className="field grow">
             <span>模拟设备</span>
-            <Select
-              value={form.deviceId}
-              onChange={(v) => setForm({ ...form, deviceId: v })}
-              options={DEVICE_PRESETS.map((d) => ({
-                value: d.id,
-                label: d.name,
-                hint: `${d.width}×${d.height}@${d.deviceScaleFactor}x`,
-              }))}
-            />
+            <DevicePicker value={form.deviceId} onChange={(v) => setForm({ ...form, deviceId: v })} />
           </label>
           <label className="field grow">
             <span>AI 配置</span>
@@ -316,6 +312,11 @@ export default function ProjectsView({ onOpened }: Props) {
               onChange={(v) => setForm({ ...form, aiProfileId: v })}
               placeholder="（尚未配置）"
               options={profiles.map((p) => ({ value: p.id, label: p.name, hint: p.model }))}
+              emptyAction={{
+                label: '新建 AI 配置',
+                hint: '还没有 AI 配置，探索需要先接一个模型。',
+                onSelect: () => setAiOpen(true),
+              }}
             />
           </label>
         </div>
@@ -326,6 +327,20 @@ export default function ProjectsView({ onOpened }: Props) {
           <div className="hint">写得越具体，AI 的探索路径越贴近你关注的功能。</div>
         </label>
       </Modal>
+
+      {/* 从「AI 配置」空态跳过来的：关掉之后把新加的配置取回来，
+          原来没选的话直接替用户选上，回到创建表单就能接着填 */}
+      <SettingsModal
+        open={aiOpen}
+        section="ai"
+        onClose={() => {
+          setAiOpen(false)
+          void invoke(CH.aiProfilesList).then((list) => {
+            setProfiles(list)
+            setForm((f) => (f.aiProfileId || list.length === 0 ? f : { ...f, aiProfileId: list[0].id }))
+          })
+        }}
+      />
     </div>
   )
 }

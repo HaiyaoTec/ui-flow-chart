@@ -320,7 +320,7 @@ label.field > .hint {
 }
 /* 收起态的按钮只放一个图标，居中且不留文字位 */
 .sidebar.collapsed nav button,
-.sidebar.collapsed .theme-trigger {
+.sidebar.collapsed .settings-trigger {
   justify-content: center;
   padding: 8px 0;
   gap: 0;

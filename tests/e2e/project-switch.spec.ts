@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { getDevice } from '../../src/shared/devices'
 import { ipc, launchApp, openFirstProject, startTestSite, TEST_SITE } from './helpers'
 
 /**
@@ -43,7 +44,8 @@ test('切换项目后，预览地址栏与设备下拉都跟着换', async () =>
     // 列表按更新时间排序，先打开的是哪个不重要，换到另一个即可
     const other = first.includes('ua-echo') ? 'B 项目' : 'A 项目'
     const otherUrlPart = other === 'B 项目' ? 'register.html' : 'ua-echo.html'
-    const otherDevice = other === 'B 项目' ? 'Pixel 7' : 'iPhone 14 Pro Max'
+    // 展示名从预设表里取，改设备清单时不用回来改测试
+    const otherDevice = getDevice(other === 'B 项目' ? 'pixel-7' : 'iphone-14-pro-max').name
 
     await window.locator('.proj-trigger').click()
     await window.waitForTimeout(400)
