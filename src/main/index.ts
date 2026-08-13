@@ -13,6 +13,9 @@ registerUfcSchemePrivileges()
 // 否则自动化会改写用户真实的 settings.json 与 profiles.json
 if (process.env.UFC_DATA_DIR) {
   app.setPath('userData', join(process.env.UFC_DATA_DIR, 'userData'))
+} else if (!app.isPackaged) {
+  // 开发模式的设置与密钥也要与安装版分开，否则两边会互相覆盖
+  app.setPath('userData', `${app.getPath('userData')} (dev)`)
 }
 
 // 单实例：第二次启动时聚焦已有窗口。

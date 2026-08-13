@@ -14,8 +14,11 @@ const PHASE_TEXT: Record<UpdateState['phase'], string> = {
   error: '检查失败',
 }
 
-/** 设置页里的更新区块：版本信息、两个开关、手动检查 */
-export default function UpdateSection() {
+/**
+ * 更新区块：版本信息、两个开关、手动检查。
+ * embedded=true 时去掉卡片外壳与标题——它在弹窗里，那两样由 Modal 提供。
+ */
+export default function UpdateSection({ embedded = false }: { embedded?: boolean }) {
   const [st, setSt] = useState<UpdateState | null>(null)
   const [settings, setSettings] = useState<AppSettings | null>(null)
 
@@ -30,8 +33,8 @@ export default function UpdateSection() {
   const busyPhase = st?.phase === 'checking' || st?.phase === 'downloading'
 
   return (
-    <div className="card">
-      <h3>软件更新</h3>
+    <div className={embedded ? '' : 'card'}>
+      {!embedded && <h3>软件更新</h3>}
 
       <div className="profile-row">
         <div className="info">

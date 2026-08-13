@@ -1,16 +1,16 @@
 import { useEffect, useState } from 'react'
 import { CH } from '@shared/ipc-contract'
 import Icon from './components/Icon'
+import Logo from './components/Logo'
 import PreviewPane from './components/preview/PreviewPane'
-import ThemeMenu from './components/ThemeMenu'
+import SettingsMenu from './components/SettingsMenu'
 import UpdateBar from './components/UpdateBar'
 import { invoke, on } from './ipc'
 import { useApp } from './state/store'
 import ProjectsView from './views/ProjectsView'
-import SettingsView from './views/SettingsView'
 import WorkspaceView from './views/WorkspaceView'
 
-type Tab = 'projects' | 'workspace' | 'preview' | 'settings'
+type Tab = 'projects' | 'workspace' | 'preview'
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('projects')
@@ -42,7 +42,10 @@ export default function App() {
     <div className="app">
       <aside className={`sidebar${navOpen ? '' : ' collapsed'}`}>
         <div className="sidebar-head">
-          {navOpen && <h1>Flow Chart</h1>}
+          {/* 收起时只留标记，展开才带文字 */}
+          <h1>
+            <Logo size={22} markOnly={!navOpen} />
+          </h1>
           <button
             className="nav-toggle"
             onClick={() => setNavOpen((v) => !v)}
@@ -68,18 +71,14 @@ export default function App() {
             <Icon name="preview" />
             {navOpen && '真机预览'}
           </button>
-          <button className={tab === 'settings' ? 'active' : ''} onClick={() => setTab('settings')} title="AI 接口设置">
-            <Icon name="settings" />
-            {navOpen && 'AI 接口设置'}
-          </button>
         </nav>
 
         <div className="spacer" />
 
-        {/* 只用一条分隔线把导航区与设置区分开，不做背景色区分 */}
+        {/* 配置类的三项（主题 / AI 接口 / 软件更新）都收在这一个入口里，
+            与上方导航之间只用一条分隔线区分，不做背景色区分 */}
         <div className="sidebar-foot">
-          {navOpen && <div className="sidebar-foot-label">设置</div>}
-          <ThemeMenu compact={!navOpen} />
+          <SettingsMenu compact={!navOpen} />
         </div>
       </aside>
 
@@ -97,7 +96,6 @@ export default function App() {
         />
       )}
       {tab === 'preview' && <PreviewPane initialUrl="http://localhost:4173" />}
-      {tab === 'settings' && <SettingsView />}
 
       {/* 更新提示常驻，不随页面切换消失；它自己决定该不该出现 */}
       <UpdateBar />

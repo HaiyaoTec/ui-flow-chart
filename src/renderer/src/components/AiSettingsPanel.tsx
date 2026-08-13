@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react'
 import { CH } from '@shared/ipc-contract'
 import type { AiProfileMasked, AiProtocol, AiTestResult, AppSettings } from '@shared/types'
-import Icon from '../components/Icon'
-import Modal from '../components/Modal'
-import Select from '../components/Select'
-import UpdateSection from '../components/UpdateSection'
+import Icon from './Icon'
+import Modal from './Modal'
+import Select from './Select'
 import { invoke } from '../ipc'
 
 const PROTOCOL_PRESETS: Record<AiProtocol, { label: string; baseUrl: string; model: string; hint: string }> = {
@@ -30,7 +29,13 @@ const blank = (protocol: AiProtocol) => ({
   model: PROTOCOL_PRESETS[protocol].model,
 })
 
-export default function SettingsView() {
+/**
+ * AI 接口配置面板。
+ *
+ * 原来是一个独立页面，现在收进左下角设置入口的弹窗里——
+ * 配置类的东西不该在主导航上占一格。这里只画内容，标题与说明交给 Modal。
+ */
+export default function AiSettingsPanel() {
   const [profiles, setProfiles] = useState<AiProfileMasked[]>([])
   const [settings, setSettingsState] = useState<AppSettings | null>(null)
   const [open, setOpen] = useState(false)
@@ -98,14 +103,8 @@ export default function SettingsView() {
   }
 
   return (
-    <div className="main">
-      <div className="page-head">
-        <div className="grow">
-          <h2>AI 接口设置</h2>
-          <div className="sub">
-            配置用于分析网站的 AI 模型。API Key 经系统安全存储加密后保存在本地，不会出现在界面与日志里。
-          </div>
-        </div>
+    <div className="ai-panel">
+      <div className="row" style={{ justifyContent: 'flex-end', marginBottom: 10 }}>
         <button className="primary" onClick={startCreate}>
           <Icon name="add" />
           新建配置
@@ -164,8 +163,6 @@ export default function SettingsView() {
           </label>
         </div>
       )}
-
-      <UpdateSection />
 
       <Modal
         title={editing ? '编辑配置' : '新建配置'}

@@ -1,9 +1,9 @@
-.theme-menu {
+.settings-menu {
   position: relative;
 }
 
 /* 配置入口要有实体感，跟上方的导航项区分开 */
-.theme-trigger {
+.settings-trigger {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -15,33 +15,32 @@
   padding: 0 10px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
 }
-.theme-trigger:hover {
+.settings-trigger:hover:not(:disabled) {
   background: color-mix(in srgb, var(--fg) 7%, var(--panel-2));
 }
-.theme-trigger .grow,
-.theme-pop .grow {
+.settings-trigger.open {
+  border-color: var(--accent);
+}
+.settings-trigger .icon,
+.settings-pop .icon {
+  flex: none;
+  color: var(--muted);
+}
+.settings-trigger .grow,
+.settings-pop .grow {
   flex: 1;
-}
-.theme-trigger .caret {
-  color: var(--muted);
-  font-size: 15px;
-  line-height: 1;
-}
-.theme-menu .icon {
-  width: 16px;
-  text-align: center;
-  color: var(--muted);
+  min-width: 0;
+  text-align: left;
 }
 
-/* 宽度不能跟着触发器走：侧边栏收起后触发器只有一个图标宽，
-   拉伸到 right:0 的话每个选项都会被压成一列竖排的字 */
-.theme-pop {
+/* 向上弹出：入口在侧边栏底部，向下没有空间 */
+.settings-pop {
   position: absolute;
   left: 0;
   right: auto;
   width: max-content;
   min-width: 100%;
-  max-width: 240px;
+  max-width: 280px;
   bottom: calc(100% + 6px);
   z-index: 50;
   padding: 5px;
@@ -50,24 +49,36 @@
   border: 1px solid var(--line);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
 }
-.theme-pop button {
+.settings-pop .row {
   display: flex;
   align-items: center;
   justify-content: flex-start;
   gap: 8px;
   width: 100%;
   white-space: nowrap;
-  text-align: left;
   background: transparent;
   border-color: transparent;
+  border-radius: var(--ctl-r);
   min-height: var(--ctl-h);
   padding: 0 9px;
+  font-size: 13px;
 }
-.theme-pop button:hover {
+.settings-pop .row:hover:not(:disabled) {
   background: var(--panel-2);
-  border-color: transparent;
 }
-.theme-pop .check {
-  color: var(--accent);
-  font-weight: 700;
+.settings-pop .row.on {
+  background: var(--panel-2);
+}
+.settings-pop .hint {
+  flex: none;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+/* 子菜单就地展开，靠缩进与左侧细线表示层级——
+   悬浮式二级菜单在这个角落容易贴边溢出，也更难点中 */
+.settings-sub {
+  margin: 2px 0 2px 14px;
+  padding-left: 8px;
+  border-left: 1px solid var(--line);
 }

@@ -286,13 +286,17 @@ label.field > .hint {
   margin-bottom: 14px;
 }
 .sidebar h1 {
-  font-size: 15px;
-  margin: 0 0 0 6px;
+  /* 里面装的是 Logo 组件（标记 + 文字），这里只管定位 */
+  margin: 0 0 0 2px;
   flex: 1;
   min-width: 0;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
   overflow: hidden;
+}
+/* 收起态只剩一个标记，居中放 */
+.sidebar.collapsed h1 {
+  margin: 0;
+  display: flex;
+  justify-content: center;
 }
 .nav-toggle {
   flex: none;
@@ -358,13 +362,6 @@ label.field > .hint {
   margin: 0 -12px -16px;
   padding: 10px 12px 12px;
   border-top: 1px solid var(--line);
-}
-.sidebar-foot-label {
-  font-size: 10.5px;
-  letter-spacing: 0.08em;
-  color: var(--muted);
-  padding: 0 4px 6px;
-  text-transform: uppercase;
 }
 
 .main {

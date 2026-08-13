@@ -11,10 +11,16 @@ export function appDataDir(): string {
 
 /**
  * 项目工程根目录：Documents/UIFlowChart/projects。
- * 自动化测试必须指到临时目录，否则会往用户真实的项目列表里塞测试数据。
+ *
+ * 三条路径必须互不干扰：
+ * - 自动化测试走 UFC_DATA_DIR 指定的临时目录，否则会往用户真实的项目列表里塞测试数据
+ * - 开发模式单独用 -dev 后缀。这条是补的：早先开发与安装版共用同一个目录，
+ *   调试时建的项目会原封不动出现在正式安装的应用里
+ * - 安装版用不带后缀的目录，这才是用户真正的工程区
  */
 export function projectsRoot(): string {
-  const base = process.env.UFC_DATA_DIR ?? join(app.getPath('documents'), 'UIFlowChart')
+  const home = app.isPackaged ? 'UIFlowChart' : 'UIFlowChart-dev'
+  const base = process.env.UFC_DATA_DIR ?? join(app.getPath('documents'), home)
   const dir = join(base, 'projects')
   ensureDir(dir)
   return dir
