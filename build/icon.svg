@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- 本文件由 scripts/make-icon.mjs 生成，改设计请改那里的几何常量 -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1b2230" />
+      <stop offset="1" stop-color="#0f131b" />
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="url(#bg)" />
+  <g fill="none" stroke="#43cd85" stroke-width="14" stroke-linecap="round">
+    <path d="M76 112 L76 144" />
+    <path d="M112 180 L144 180" />
+  </g>
+
+  <rect x="40" y="40" width="72" height="72" rx="20" fill="#43cd85" />
+  <rect x="40" y="144" width="72" height="72" rx="20" fill="#43cd85" />
+  <rect x="144" y="144" width="72" height="72" rx="20" fill="#8af2b6" />
+</svg>

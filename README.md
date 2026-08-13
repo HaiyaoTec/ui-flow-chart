@@ -125,6 +125,7 @@ events.jsonl      人工接管期的控件事件（只记控件标识，不含�
 完整方案（含许可证选型、签名取舍、数据迁移）见 [docs/release-and-update.md](docs/release-and-update.md)。
 
 ```bash
+npm run icon          # 由 scripts/make-icon.mjs 重新生成 build/icon.{svg,png,ico}
 npm run dist          # 本地产出 release/ 下的安装包
 npm version patch     # 版本号唯一来源是 package.json
 git push --follow-tags  # 推标签触发 CI 打包并发草稿 Release
