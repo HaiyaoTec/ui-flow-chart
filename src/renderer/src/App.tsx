@@ -42,7 +42,7 @@ export default function App() {
     <div className="app">
       <aside className={`sidebar${navOpen ? '' : ' collapsed'}`}>
         <div className="sidebar-head">
-          {navOpen && <h1>UI Flow Chart</h1>}
+          {navOpen && <h1>Flow Chart</h1>}
           <button
             className="nav-toggle"
             onClick={() => setNavOpen((v) => !v)}

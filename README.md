@@ -1,15 +1,15 @@
-# UI Flow Chart
+# Flow Chart
 
 AI 驱动的网站功能路径分析工具。填入 AI 接口与目标网址，AI 会自主探索站点、逐屏截图建图，实时渲染成可缩放的交互流程画布；同一个窗口还是一个类 Figma 的真机模拟预览器，AI 遇到登录墙或验证码时可以直接接手操作。
 
 ## 安装
 
-到 [Releases](../../releases) 下载 `UI Flow Chart-x.y.z-setup.exe`。
+到 [Releases](../../releases) 下载 `Flow Chart-x.y.z-setup.exe`。
 
 安装包目前**未做代码签名**，Windows 会提示「未知发布者」，需要点「更多信息 → 仍要运行」。介意的话可以先核对 SHA256（每个 Release 的说明里都附了）：
 
 ```bash
-certutil -hashfile "UI Flow Chart-0.1.0-setup.exe" SHA256
+certutil -hashfile "Flow Chart-0.1.0-setup.exe" SHA256
 ```
 
 应用会自动检查更新（可在设置里关掉），新版本从 GitHub Release 下载，重启后生效；探索进行中不会自动重启。

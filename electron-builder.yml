@@ -1,5 +1,5 @@
-appId: com.uiflowchart.app
-productName: UI Flow Chart
+appId: com.haiyaotec.flowchart
+productName: Flow Chart
 copyright: Copyright © 2026 Haiyao Tec
 
 directories:
@@ -35,7 +35,7 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: UI Flow Chart
+  shortcutName: Flow Chart
   # 差量更新的块映射，能显著减小后续更新的下载量
   differentialPackage: true
 

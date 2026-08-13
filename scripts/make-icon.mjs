@@ -19,37 +19,32 @@ const G = 256 // 设计栅格
 
 /* --------------------------------- 设计 --------------------------------- */
 
+/**
+ * 一个由三段粗圆角笔画拼出的 F：竖干 + 上横 + 中横。
+ *
+ * 造型语言取自 Notion Calendar 那类图标——笔画很粗、端头全圆、整体走一道斜向渐变，
+ * 两笔交叠处提亮成一块更浅的色，交叠本身成为图形的一部分，而不是被盖住。
+ *
+ * 小尺寸优先：笔画粗到 46/256（16px 下约 3px），端头圆到极致，
+ * 缩小后仍是一个立得住的 F；底色用浅色，深色任务栏上比深底图标更跳。
+ */
 const C = {
-  bgTop: [0x1b, 0x22, 0x30],
-  bgBottom: [0x0f, 0x13, 0x1b],
-  node: [0x43, 0xcd, 0x85],
-  nodeEnd: [0x8a, 0xf2, 0xb6],
-  // 连接段与节点同色：小尺寸下深一档的连线会直接消失，同色反而让整体成为一个完整轮廓
-  link: [0x43, 0xcd, 0x85],
+  bgTop: [0xf4, 0xf7, 0xfb],
+  bgBottom: [0xe6, 0xec, 0xf5],
+  // 斜向渐变的两端
+  from: [0x4a, 0xe0, 0x8c],
+  to: [0x0e, 0x93, 0x5c],
+  // 笔画交叠处：比两端都亮，交叠因此看得见
+  cross: [0x9d, 0xf7, 0xc4],
 }
 
-/**
- * 2×2 网格里三个等大的圆角方块，空出右上角；两段短连接把它们串成
- * 「向下再向右」的一条路径。留白本身就是构图的一部分。
- *
- * 不画箭头：箭头在 16px 下只会糊成一个疙瘩，而方向感其实靠终点那块更亮的绿就够了。
- * 小尺寸优先的取舍——实心块比描边耐缩，连接段粗到 12/256（16px 下不到 1px 但仍连得住），
- * 全图只有五个形状，没有任何装饰细节。
- */
-const N = 72 // 节点边长
-const R = 20 // 节点圆角
-const NODES = [
-  { x: 40, y: 40, w: N, h: N, r: R, c: C.node },
-  { x: 40, y: 144, w: N, h: N, r: R, c: C.node },
-  { x: 144, y: 144, w: N, h: N, r: R, c: C.nodeEnd },
+const BAR = 46 // 笔画粗细
+// 整体略右移做光学配平：F 天生左重，机械居中看着会偏左
+const STEM = [[84, 62], [84, 198]] // 竖干
+const ARMS = [
+  [[84, 62], [194, 62]], // 上横
+  [[84, 126], [172, 126]], // 中横
 ]
-const LINK_W = 14
-// 连接段正好填满两块之间的空隙，不出头、不留缝
-const LINES = [
-  [[76, 112], [76, 144]], // 向下
-  [[112, 180], [144, 180]], // 向右
-]
-const ARROWS = []
 
 /* ------------------------------- 距离场绘制 ------------------------------ */
 
@@ -106,32 +101,38 @@ function inTriangle(px, py, [[ax, ay], [bx, by], [cx, cy]]) {
   return (s1 >= 0 && s2 >= 0 && s3 >= 0) || (s1 <= 0 && s2 <= 0 && s3 <= 0)
 }
 
-const onLink = (gx, gy) =>
-  LINES.some(([a, b]) => sdSegment(gx, gy, a, b) <= LINK_W / 2) ||
-  ARROWS.some((t) => inTriangle(gx, gy, t))
+/** 斜向渐变：沿左上→右下投影取色，整枚图标共用一道，笔画之间不会断色 */
+function gradient(gx, gy) {
+  const t = clamp01((gx + gy - 80) / 300)
+  return C.from.map((v, k) => Math.round(v + (C.to[k] - v) * t))
+}
+
+const inBar = (gx, gy, [a, b]) => sdSegment(gx, gy, a, b) <= BAR / 2
 
 function render(size) {
   const buf = Buffer.alloc(size * size * 4, 0)
-  const bgShape = { x: 0, y: 0, w: G, h: G, r: 56 }
+  const bgShape = { x: 0, y: 0, w: G, h: G, r: 58 }
 
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const i = (y * size + x) * 4
 
-      // 背景：圆角方块 + 纵向渐变
+      // 背景：圆角方块 + 纵向浅色渐变
       const aBg = coverage(x, y, size, (gx, gy) => sdRoundRect(gx, gy, bgShape) <= 0)
       if (aBg > 0) {
         const t = (y + 0.5) / size
-        const rgb = C.bgTop.map((v, k) => Math.round(v + (C.bgBottom[k] - v) * t))
-        over(buf, i, rgb, aBg)
+        over(buf, i, C.bgTop.map((v, k) => Math.round(v + (C.bgBottom[k] - v) * t)), aBg)
       }
 
-      // 连线先画，节点压在上面
-      over(buf, i, C.link, coverage(x, y, size, onLink))
-
-      for (const n of NODES) {
-        over(buf, i, n.c, coverage(x, y, size, (gx, gy) => sdRoundRect(gx, gy, n) <= 0))
-      }
+      // 先铺两道横，再压竖干；两者都盖到的地方最后用更亮的颜色点出来
+      const aArms = coverage(x, y, size, (gx, gy) => ARMS.some((s) => inBar(gx, gy, s)))
+      const aStem = coverage(x, y, size, (gx, gy) => inBar(gx, gy, STEM))
+      const gx = ((x + 0.5) / size) * G
+      const gy = ((y + 0.5) / size) * G
+      const g = gradient(gx, gy)
+      over(buf, i, g, aArms)
+      over(buf, i, g, aStem)
+      over(buf, i, C.cross, Math.min(aArms, aStem))
     }
   }
   return buf
@@ -211,14 +212,10 @@ function toIco(entries) {
 
 const hex = (c) => `#${c.map((v) => v.toString(16).padStart(2, '0')).join('')}`
 
+const NL = String.fromCharCode(10)
+
 function toSvg() {
-  const links = LINES.map(([a, b]) => `    <path d="M${a[0]} ${a[1]} L${b[0]} ${b[1]}" />`).join('\n')
-  const arrows = ARROWS.map(
-    (t) => `  <polygon points="${t.map(([x, y]) => `${x},${y}`).join(' ')}" fill="${hex(C.link)}" />`
-  ).join('\n')
-  const nodes = NODES.map(
-    (n) => `  <rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="${n.r}" fill="${hex(n.c)}" />`
-  ).join('\n')
+  const bar = ([a, b]) => `M${a[0]} ${a[1]} L${b[0]} ${b[1]}`
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${G} ${G}" width="${G}" height="${G}">
   <!-- 本文件由 scripts/make-icon.mjs 生成，改设计请改那里的几何常量 -->
   <defs>
@@ -226,13 +223,24 @@ function toSvg() {
       <stop offset="0" stop-color="${hex(C.bgTop)}" />
       <stop offset="1" stop-color="${hex(C.bgBottom)}" />
     </linearGradient>
+    <linearGradient id="ink" x1="0.1" y1="0.1" x2="0.9" y2="0.9">
+      <stop offset="0" stop-color="${hex(C.from)}" />
+      <stop offset="1" stop-color="${hex(C.to)}" />
+    </linearGradient>
+    <mask id="stem">
+      <rect width="${G}" height="${G}" fill="black" />
+      <path d="${bar(STEM)}" stroke="white" stroke-width="${BAR}" stroke-linecap="round" fill="none" />
+    </mask>
   </defs>
-  <rect width="${G}" height="${G}" rx="56" fill="url(#bg)" />
-  <g fill="none" stroke="${hex(C.link)}" stroke-width="${LINK_W}" stroke-linecap="round">
-${links}
+  <rect width="${G}" height="${G}" rx="58" fill="url(#bg)" />
+  <g stroke="url(#ink)" stroke-width="${BAR}" stroke-linecap="round" fill="none">
+${ARMS.map((a) => `    <path d="${bar(a)}" />`).join(NL)}
+    <path d="${bar(STEM)}" />
   </g>
-${arrows}
-${nodes}
+  <!-- 交叠提亮：只在竖干范围内重画两道横 -->
+  <g mask="url(#stem)" stroke="${hex(C.cross)}" stroke-width="${BAR}" stroke-linecap="round" fill="none">
+${ARMS.map((a) => `    <path d="${bar(a)}" />`).join(NL)}
+  </g>
 </svg>
 `
 }

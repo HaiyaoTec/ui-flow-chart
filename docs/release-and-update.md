@@ -33,7 +33,7 @@ electron-updater 接入、数据迁移框架）。唯一没做的是第七节第
 - `publish.provider: github` 不写 owner/repo：CI 与本地都从 git remote 推断，fork 后无需改配置
 - `releaseType: draft`：产物先进草稿，人工确认齐全再 Publish，避免半成品被用户拉走
 
-**产物**：`UI Flow Chart-1.2.3-setup.exe`、`latest.yml`（更新元数据，必须一并发布）、以及可选的 `*.zip` 便携版。
+**产物**：`Flow Chart-1.2.3-setup.exe`、`latest.yml`（更新元数据，必须一并发布）、以及可选的 `*.zip` 便携版。
 
 **本地打包的一个坑**：`signAndEditExecutable: true`（给 exe 写图标与版本信息）会让 electron-builder 解压 winCodeSign 工具包，包里含 macOS 的符号链接。Windows 未开「开发者模式」时创建符号链接需要管理员权限，本地 `npm run dist` 会卡在解压这一步；CI 的 runner 有该权限，不受影响。本地要打包就先开开发者模式，或用管理员终端跑一次把缓存落地。
 

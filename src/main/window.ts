@@ -41,7 +41,7 @@ export function createMainWindow(): BaseWindow {
     minHeight: 700,
     show: false,
     backgroundColor: themeBackground(),
-    title: 'UI Flow Chart',
+    title: 'Flow Chart',
   })
 
   /**
