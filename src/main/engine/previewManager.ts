@@ -31,6 +31,8 @@ export class PreviewManager {
   private awaitTimer: NodeJS.Timeout | null = null
   /** 正在切换设备：这期间任何「新矩形到了」都不放行视图 */
   private switching = false
+  /** 本轮 hold 之后是否已经收到过新矩形。没有就不能拿旧矩形把视图亮出来 */
+  private paneFresh = false
   /** 视口同步的串行队列 */
   private applyChain: Promise<void> = Promise.resolve()
 
@@ -143,6 +145,8 @@ export class PreviewManager {
       await this.verifyAndHeal().catch(() => null)
       // 重载完成后再同步一次，这时用的才是新设备对应的矩形
       await this.syncViewport(true)
+      // 留一帧给新尺寸下的首次绘制，否则刚放出来的还是按旧尺寸铺出来的画面
+      await new Promise((r) => setTimeout(r, 200))
     } finally {
       this.switching = false
       this.releasePane()
@@ -165,6 +169,8 @@ export class PreviewManager {
     // 采信它会把原生视图摆到设备外框之外
     if (b.width < 80 || b.height < 80) return
     this.pane = { x: b.x, y: b.y, width: b.width, height: b.height }
+    // 这是本轮真正等到的新矩形，兜底超时可以放心放行了
+    this.paneFresh = true
     // 用户手动指定了缩放时，矩形可能是裁切过的，反推不出比例，只能采信上报值
     this.paneScale = typeof b.scale === 'number' && b.scale > 0 ? b.scale : null
     if (!this.driver.attached || this.opening) return
@@ -181,9 +187,23 @@ export class PreviewManager {
    */
   private holdUntilPane(): void {
     this.awaitingPane = true
+    this.paneFresh = false
     this.driver.setVisible(false)
     if (this.awaitTimer) clearTimeout(this.awaitTimer)
-    // 兜底：万一渲染进程没有上报（页面没挂载预览面板），不能让视图永远藏着
+    this.awaitTimer = setTimeout(() => this.onHoldTimeout(), 2500)
+  }
+
+  /**
+   * 兜底超时。
+   *
+   * 关键是「没等到新矩形就不能亮」：从真机预览页进项目时，上一次的矩形是那一页的
+   * 大矩形（贴着左边、几乎占满），拿它把视图亮出来，网页就会盖在侧边栏和画布上，
+   * 等渲染进程报来新矩形才归位——正是「过一会自己恢复」的那个现象。
+   * 所以先催渲染进程重报一次，仍然没有再放行。
+   */
+  private onHoldTimeout(): void {
+    if (this.paneFresh) return this.releasePane()
+    this.emitNav()
     this.awaitTimer = setTimeout(() => this.releasePane(), 2500)
   }
 
@@ -217,6 +237,9 @@ export class PreviewManager {
           await this.driver.applyDevice(this.device, fit)
         }
         this.applyBounds(pane, fit)
+        // 尺寸一变就作废整帧：不主动重绘的话，合成器会把旧图块铺满新尺寸，
+        // 表现为同一屏内容在框里重复好几遍
+        this.driver.repaint()
       })
       .catch(() => {
         /* 单次同步失败不影响后续 */

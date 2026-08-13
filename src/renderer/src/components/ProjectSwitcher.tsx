@@ -83,8 +83,9 @@ export default function ProjectSwitcher({ current, onSwitched, onBackToList }: P
                     <span className="nm">{p.name}</span>
                     <span className="u mono">{p.targetUrl}</span>
                   </span>
+                  {/* 当前项目不再额外画勾：右边已经有「已完成」这类状态徽标，
+                      两个符号挤在一起谁都看不清。选中态改用左侧色条 + 加粗标题表达 */}
                   {state && <span className={`state-chip ${state}`}>{STATE_LABEL[state] ?? state}</span>}
-                  {p.id === current.id && <span className="check">✓</span>}
                 </button>
               )
             })}

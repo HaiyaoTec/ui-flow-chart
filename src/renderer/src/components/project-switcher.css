@@ -80,8 +80,25 @@
   background: var(--panel-2);
   border-color: transparent;
 }
+/* 当前项目：左侧色条 + 标题加粗。
+   原来右侧还画一个勾，与「已完成」这类状态徽标挤在一起，两个符号都看不清 */
 .proj-pop-list button.on {
   background: var(--panel-2);
+  position: relative;
+}
+.proj-pop-list button.on::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+.proj-pop-list button.on .nm {
+  font-weight: 600;
+  color: var(--accent);
 }
 .proj-pop-list .grow {
   flex: 1;
