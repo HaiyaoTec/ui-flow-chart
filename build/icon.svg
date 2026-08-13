@@ -1,28 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
   <!-- 本文件由 scripts/make-icon.mjs 生成，改设计请改那里的几何常量 -->
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#f4f7fb" />
-      <stop offset="1" stop-color="#e6ecf5" />
+    <linearGradient id="bg" x1="0.1" y1="0.1" x2="0.9" y2="0.9">
+      <stop offset="0" stop-color="#3fd485" />
+      <stop offset="1" stop-color="#0b8250" />
     </linearGradient>
-    <linearGradient id="ink" x1="0.1" y1="0.1" x2="0.9" y2="0.9">
-      <stop offset="0" stop-color="#4ae08c" />
-      <stop offset="1" stop-color="#0e935c" />
-    </linearGradient>
-    <mask id="stem">
-      <rect width="256" height="256" fill="black" />
-      <path d="M84 62 L84 198" stroke="white" stroke-width="46" stroke-linecap="round" fill="none" />
-    </mask>
   </defs>
   <rect width="256" height="256" rx="58" fill="url(#bg)" />
-  <g stroke="url(#ink)" stroke-width="46" stroke-linecap="round" fill="none">
-    <path d="M84 62 L194 62" />
-    <path d="M84 126 L172 126" />
-    <path d="M84 62 L84 198" />
-  </g>
-  <!-- 交叠提亮：只在竖干范围内重画两道横 -->
-  <g mask="url(#stem)" stroke="#9df7c4" stroke-width="46" stroke-linecap="round" fill="none">
-    <path d="M84 62 L194 62" />
-    <path d="M84 126 L172 126" />
+  <g stroke="#ffffff" stroke-width="40" stroke-linecap="round" fill="none">
+    <path d="M92 70 L186 70" />
+    <path d="M92 128 L166 128" />
+    <path d="M92 70 L92 190" />
   </g>
 </svg>

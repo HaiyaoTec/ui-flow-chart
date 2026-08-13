@@ -22,29 +22,26 @@ const G = 256 // 设计栅格
 /**
  * 一个由三段粗圆角笔画拼出的 F：竖干 + 上横 + 中横。
  *
- * 造型语言取自 Notion Calendar 那类图标——笔画很粗、端头全圆、整体走一道斜向渐变，
- * 两笔交叠处提亮成一块更浅的色，交叠本身成为图形的一部分，而不是被盖住。
- *
- * 小尺寸优先：笔画粗到 46/256（16px 下约 3px），端头圆到极致，
- * 缩小后仍是一个立得住的 F；底色用浅色，深色任务栏上比深底图标更跳。
+ * 造型语言取自 Notion Calendar 那类图标——笔画很粗、端头全圆。
+ * 绿底白笔而不是浅底绿笔：浅底那版在 512px 下清楚，缩到任务栏的 32px、
+ * 侧边栏的 22px 就只剩几像素笔画，浅绿压浅灰几乎看不出形状。
+ * 几何与颜色跟渲染层的 Logo 组件（src/renderer/src/components/Logo.tsx）保持一致。
  */
 const C = {
-  bgTop: [0xf4, 0xf7, 0xfb],
-  bgBottom: [0xe6, 0xec, 0xf5],
-  // 斜向渐变的两端
-  from: [0x4a, 0xe0, 0x8c],
-  to: [0x0e, 0x93, 0x5c],
-  // 笔画交叠处：比两端都亮，交叠因此看得见
-  cross: [0x9d, 0xf7, 0xc4],
+  // 底色斜向渐变的两端
+  from: [0x3f, 0xd4, 0x85],
+  to: [0x0b, 0x82, 0x50],
+  ink: [0xff, 0xff, 0xff],
 }
 
-const BAR = 46 // 笔画粗细
+const BAR = 40 // 笔画粗细
 // 整体略右移做光学配平：F 天生左重，机械居中看着会偏左
-const STEM = [[84, 62], [84, 198]] // 竖干
+const STEM = [[92, 70], [92, 190]] // 竖干
 const ARMS = [
-  [[84, 62], [194, 62]], // 上横
-  [[84, 126], [172, 126]], // 中横
+  [[92, 70], [186, 70]], // 上横
+  [[92, 128], [166, 128]], // 中横
 ]
+const STROKES = [...ARMS, STEM]
 
 /* ------------------------------- 距离场绘制 ------------------------------ */
 
@@ -84,26 +81,26 @@ function coverage(px, py, size, inside) {
   return hit / (S * S)
 }
 
+/**
+ * source-over 合成，直通 alpha（PNG 存的就是直通 alpha，不是预乘）。
+ *
+ * 早先按预乘的写法算颜色、又按直通写进 PNG：边缘半透明像素的 RGB 被乘暗了一次，
+ * 显示时再乘一次 alpha，于是轮廓外圈挂着一圈发暗的脏边。
+ * 正确做法是把结果颜色除回 outA。
+ */
 function over(dst, i, rgb, a) {
   if (a <= 0) return
-  const inv = 1 - a
-  dst[i] = Math.round(rgb[0] * a + dst[i] * inv)
-  dst[i + 1] = Math.round(rgb[1] * a + dst[i + 1] * inv)
-  dst[i + 2] = Math.round(rgb[2] * a + dst[i + 2] * inv)
-  dst[i + 3] = Math.round(255 * a + dst[i + 3] * inv)
+  const da = dst[i + 3] / 255
+  const outA = a + da * (1 - a)
+  if (outA <= 0) return
+  const keep = da * (1 - a)
+  for (let k = 0; k < 3; k++) dst[i + k] = Math.round((rgb[k] * a + dst[i + k] * keep) / outA)
+  dst[i + 3] = Math.round(outA * 255)
 }
 
-/** 点在三角形内：三条边的叉积同号 */
-function inTriangle(px, py, [[ax, ay], [bx, by], [cx, cy]]) {
-  const s1 = (bx - ax) * (py - ay) - (by - ay) * (px - ax)
-  const s2 = (cx - bx) * (py - by) - (cy - by) * (px - bx)
-  const s3 = (ax - cx) * (py - cy) - (ay - cy) * (px - cx)
-  return (s1 >= 0 && s2 >= 0 && s3 >= 0) || (s1 <= 0 && s2 <= 0 && s3 <= 0)
-}
-
-/** 斜向渐变：沿左上→右下投影取色，整枚图标共用一道，笔画之间不会断色 */
+/** 斜向渐变：沿左上→右下投影取色，与 Logo 组件的 x1/y1 0.1 → x2/y2 0.9 对齐 */
 function gradient(gx, gy) {
-  const t = clamp01((gx + gy - 80) / 300)
+  const t = clamp01((gx + gy - 0.2 * G) / (1.6 * G))
   return C.from.map((v, k) => Math.round(v + (C.to[k] - v) * t))
 }
 
@@ -117,22 +114,15 @@ function render(size) {
     for (let x = 0; x < size; x++) {
       const i = (y * size + x) * 4
 
-      // 背景：圆角方块 + 纵向浅色渐变
-      const aBg = coverage(x, y, size, (gx, gy) => sdRoundRect(gx, gy, bgShape) <= 0)
-      if (aBg > 0) {
-        const t = (y + 0.5) / size
-        over(buf, i, C.bgTop.map((v, k) => Math.round(v + (C.bgBottom[k] - v) * t)), aBg)
-      }
-
-      // 先铺两道横，再压竖干；两者都盖到的地方最后用更亮的颜色点出来
-      const aArms = coverage(x, y, size, (gx, gy) => ARMS.some((s) => inBar(gx, gy, s)))
-      const aStem = coverage(x, y, size, (gx, gy) => inBar(gx, gy, STEM))
+      // 背景：圆角方块 + 斜向绿色渐变
       const gx = ((x + 0.5) / size) * G
       const gy = ((y + 0.5) / size) * G
-      const g = gradient(gx, gy)
-      over(buf, i, g, aArms)
-      over(buf, i, g, aStem)
-      over(buf, i, C.cross, Math.min(aArms, aStem))
+      const aBg = coverage(x, y, size, (gx2, gy2) => sdRoundRect(gx2, gy2, bgShape) <= 0)
+      over(buf, i, gradient(gx, gy), aBg)
+
+      // 三笔取并集一次画完：分笔叠加会在交叠处的半覆盖像素上留下接缝
+      const aInk = coverage(x, y, size, (gx2, gy2) => STROKES.some((s) => inBar(gx2, gy2, s)))
+      over(buf, i, C.ink, aInk)
     }
   }
   return buf
@@ -219,27 +209,14 @@ function toSvg() {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${G} ${G}" width="${G}" height="${G}">
   <!-- 本文件由 scripts/make-icon.mjs 生成，改设计请改那里的几何常量 -->
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="${hex(C.bgTop)}" />
-      <stop offset="1" stop-color="${hex(C.bgBottom)}" />
-    </linearGradient>
-    <linearGradient id="ink" x1="0.1" y1="0.1" x2="0.9" y2="0.9">
+    <linearGradient id="bg" x1="0.1" y1="0.1" x2="0.9" y2="0.9">
       <stop offset="0" stop-color="${hex(C.from)}" />
       <stop offset="1" stop-color="${hex(C.to)}" />
     </linearGradient>
-    <mask id="stem">
-      <rect width="${G}" height="${G}" fill="black" />
-      <path d="${bar(STEM)}" stroke="white" stroke-width="${BAR}" stroke-linecap="round" fill="none" />
-    </mask>
   </defs>
   <rect width="${G}" height="${G}" rx="58" fill="url(#bg)" />
-  <g stroke="url(#ink)" stroke-width="${BAR}" stroke-linecap="round" fill="none">
-${ARMS.map((a) => `    <path d="${bar(a)}" />`).join(NL)}
-    <path d="${bar(STEM)}" />
-  </g>
-  <!-- 交叠提亮：只在竖干范围内重画两道横 -->
-  <g mask="url(#stem)" stroke="${hex(C.cross)}" stroke-width="${BAR}" stroke-linecap="round" fill="none">
-${ARMS.map((a) => `    <path d="${bar(a)}" />`).join(NL)}
+  <g stroke="${hex(C.ink)}" stroke-width="${BAR}" stroke-linecap="round" fill="none">
+${STROKES.map((a) => `    <path d="${bar(a)}" />`).join(NL)}
   </g>
 </svg>
 `
