@@ -20,6 +20,7 @@ import {
   partitionOf,
 } from '../store/projects'
 import { getSettings, setSettings } from '../store/settings'
+import { updater } from '../updater'
 import { applyViewBackground, getUiView, themeBackground } from '../window'
 
 type Handler<C extends InvokeChannel> = (
@@ -144,6 +145,11 @@ export function registerIpc(getWindow: () => BaseWindow | null): void {
    */
   handle(CH.uiStack, ({ front }) => preview.setStackFront(front))
 
+  /* --------------------------------- 更新 --------------------------------- */
+  handle(CH.updateCheck, ({ manual }) => updater.check(Boolean(manual)))
+  handle(CH.updateDownload, () => updater.download())
+  handle(CH.updateInstall, ({ force }) => updater.install(Boolean(force)))
+
   /* --------------------------------- 图谱 --------------------------------- */
   handle(CH.graphUpdateNode, ({ id, patch }) => {
     const pid = sessions.snapshot().projectId
@@ -197,6 +203,10 @@ function registerTestHooks(getWindow: () => BaseWindow | null): void {
     return { pngBytes: shot.png.length, jpegBase64Length: shot.jpegBase64.length }
   })
   ipcMain.handle('test:probe', async () => preview.driver.probe())
+  /** 注入更新状态，用于验证更新提示条与设置区块的各种形态 */
+  ipcMain.handle('test:update-state', async (_e, patch: Record<string, unknown>) =>
+    updater.injectForTest(patch as never)
+  )
   ipcMain.handle('test:wait-stable', async () => preview.driver.waitStable())
   ipcMain.handle('test:graph', async (_e, projectId: string) => loadGraph(projectId))
   ipcMain.handle('test:preview-debug', async () => preview.debugInfo())

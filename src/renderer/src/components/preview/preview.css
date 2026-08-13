@@ -81,7 +81,7 @@
 /* 表单控件默认比按钮高一档，压回同一高度，整条栏才对得上画布那条 */
 .preview-toolbar .ufc-select,
 .preview-toolbar input.url {
-  padding: 5px 7px 5px 10px;
+  padding: 0 7px 0 10px;
 }
 .preview-toolbar .ufc-select {
   flex: 0 1 auto;
@@ -102,7 +102,7 @@
 }
 .preview-toolbar button {
   flex: none;
-  padding: 6px 10px;
+  padding: 0 10px;
 }
 
 .preview-stage {

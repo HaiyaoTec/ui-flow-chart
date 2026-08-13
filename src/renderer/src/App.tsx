@@ -3,6 +3,7 @@ import { CH } from '@shared/ipc-contract'
 import Icon from './components/Icon'
 import PreviewPane from './components/preview/PreviewPane'
 import ThemeMenu from './components/ThemeMenu'
+import UpdateBar from './components/UpdateBar'
 import { invoke, on } from './ipc'
 import { useApp } from './state/store'
 import ProjectsView from './views/ProjectsView'
@@ -97,6 +98,9 @@ export default function App() {
       )}
       {tab === 'preview' && <PreviewPane initialUrl="http://localhost:4173" />}
       {tab === 'settings' && <SettingsView />}
+
+      {/* 更新提示常驻，不随页面切换消失；它自己决定该不该出现 */}
+      <UpdateBar />
     </div>
   )
 }

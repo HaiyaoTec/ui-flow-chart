@@ -9,7 +9,8 @@
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 7px 9px 7px 11px;
+  min-height: var(--ctl-h);
+  padding: 0 9px 0 11px;
   font-size: 13px;
   color: var(--fg);
 }
@@ -58,13 +59,15 @@
 .ufc-select-pop button {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 8px;
   width: 100%;
   text-align: left;
   background: transparent;
   border-color: transparent;
-  border-radius: 8px;
-  padding: 7px 9px;
+  border-radius: var(--ctl-r);
+  min-height: var(--ctl-h);
+  padding: 0 9px;
   font-size: 13px;
 }
 .ufc-select-pop button.active,

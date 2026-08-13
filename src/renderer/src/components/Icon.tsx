@@ -5,6 +5,7 @@ import {
   ChevronRight,
   ChevronUp,
   CircleAlert,
+  Download,
   FileText,
   FolderOpen,
   Globe,
@@ -74,6 +75,7 @@ const ICONS = {
   collapse: PanelLeftClose,
   expand: PanelLeftOpen,
   add: Plus,
+  download: Download,
   edit: Pencil,
 } satisfies Record<string, LucideIcon>
 

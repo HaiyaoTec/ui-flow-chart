@@ -25,7 +25,7 @@
   min-height: var(--toolbar-h);
 }
 .canvas-toolbar button {
-  padding: 6px 10px;
+  padding: 0 10px;
 }
 .canvas-lanes {
   padding: 6px 12px;

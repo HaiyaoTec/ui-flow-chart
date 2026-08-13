@@ -1,0 +1,52 @@
+name: Release
+
+# 版本号的唯一来源是 package.json，标签只是触发器：
+#   npm version patch && git push --follow-tags
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write # 创建 Release、上传产物
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+      # 标签必须与 package.json 的版本一致，否则自动更新会对不上号
+      - name: 校对标签与版本
+        shell: pwsh
+        run: |
+          $pkg = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $tag = "${{ github.ref_name }}".TrimStart('v')
+          if ($pkg -ne $tag) { throw "package.json 是 $pkg，标签是 $tag，请先对齐" }
+
+      # --publish always 会把 setup.exe 与 latest.yml 一起传到草稿 Release。
+      # latest.yml 是 electron-updater 的唯一事实源，缺了它应用内更新就不工作。
+      - name: 打包并发布草稿
+        run: npx electron-builder --win --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 输出校验值
+        shell: pwsh
+        run: |
+          Get-ChildItem release/*.exe | ForEach-Object {
+            "$($_.Name)  $((Get-FileHash $_.FullName -Algorithm SHA256).Hash)"
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: |
+            release/*.exe
+            release/latest.yml

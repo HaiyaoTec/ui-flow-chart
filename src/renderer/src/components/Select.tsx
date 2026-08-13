@@ -169,7 +169,6 @@ export default function Select({
               >
                 <span className="val">{o.label}</span>
                 {o.hint && <span className="hint">{o.hint}</span>}
-                {o.value === value && <span className="check">✓</span>}
               </button>
             ))}
           </div>,

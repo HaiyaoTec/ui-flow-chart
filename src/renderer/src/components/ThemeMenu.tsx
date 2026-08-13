@@ -94,7 +94,6 @@ export default function ThemeMenu({ compact = false }: { compact?: boolean }) {
             <button key={o.value} role="menuitemradio" aria-checked={theme === o.value} onClick={() => void pick(o.value)}>
               <Icon name={o.icon} />
               <span className="grow">{o.label}</span>
-              {theme === o.value && <span className="check">✓</span>}
             </button>
           ))}
         </div>

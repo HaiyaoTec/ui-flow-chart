@@ -1,0 +1,47 @@
+/* 底部通知条：窄、不遮内容、随时可关。不用弹窗是刻意的——
+   更新不该打断正在进行的探索 */
+.update-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(560px, calc(100vw - 40px));
+  padding: 8px 10px 8px 14px;
+  font-size: 12.5px;
+  color: var(--fg);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+}
+.update-bar .icon {
+  flex: none;
+  color: var(--accent);
+}
+.update-bar .grow {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.update-bar .muted {
+  color: var(--muted);
+  margin-left: 4px;
+}
+.update-bar .pct {
+  flex: none;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.update-bar .link-btn {
+  flex: none;
+}
+.update-bar .link-btn.strong {
+  color: var(--accent);
+  font-weight: 600;
+}

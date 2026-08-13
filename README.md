@@ -2,7 +2,19 @@
 
 AI 驱动的网站功能路径分析工具。填入 AI 接口与目标网址，AI 会自主探索站点、逐屏截图建图，实时渲染成可缩放的交互流程画布；同一个窗口还是一个类 Figma 的真机模拟预览器，AI 遇到登录墙或验证码时可以直接接手操作。
 
-## 快速开始
+## 安装
+
+到 [Releases](../../releases) 下载 `UI Flow Chart-x.y.z-setup.exe`。
+
+安装包目前**未做代码签名**，Windows 会提示「未知发布者」，需要点「更多信息 → 仍要运行」。介意的话可以先核对 SHA256（每个 Release 的说明里都附了）：
+
+```bash
+certutil -hashfile "UI Flow Chart-0.1.0-setup.exe" SHA256
+```
+
+应用会自动检查更新（可在设置里关掉），新版本从 GitHub Release 下载，重启后生效；探索进行中不会自动重启。
+
+## 从源码运行
 
 ```bash
 npm install
@@ -105,4 +117,19 @@ events.jsonl      人工接管期的控件事件（只记控件标识，不含�
 
 - Safari 档位底层仍是 Chromium，UA 字符串可以伪装但客户端提示无法完全仿真，指纹级检测可识破。遇到反爬硬墙一律走人工接管，不做绕过。
 - 同一时刻只支持一个项目在探索。
-- 尚未打包安装程序（`electron-builder` 配置留待下一轮）。
+- 安装包未做代码签名，首次安装会有 SmartScreen 提示。
+
+## 发布与更新
+
+打包与发版走 `electron-builder` + GitHub Actions，应用内更新走 `electron-updater`。
+完整方案（含许可证选型、签名取舍、数据迁移）见 [docs/release-and-update.md](docs/release-and-update.md)。
+
+```bash
+npm run dist          # 本地产出 release/ 下的安装包
+npm version patch     # 版本号唯一来源是 package.json
+git push --follow-tags  # 推标签触发 CI 打包并发草稿 Release
+```
+
+## 许可证
+
+[MIT](LICENSE)。依赖链许可证：Electron / React / zustand / zod / electron-updater 为 MIT，lucide-react 为 ISC。

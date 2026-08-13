@@ -45,6 +45,10 @@ export const CH = {
   previewDiagnose: 'preview:diagnose',
   uiStack: 'ui:stack',
 
+  updateCheck: 'update:check',
+  updateDownload: 'update:download',
+  updateInstall: 'update:install',
+
   graphUpdateNode: 'graph:update-node',
   graphUpdateEdge: 'graph:update-edge',
   graphDeleteNode: 'graph:delete-node',
@@ -59,7 +63,19 @@ export const CH = {
   evGraphPatch: 'graph:patch',
   evPreviewNav: 'preview:nav-state',
   evWatchShot: 'watch:shot',
+  evUpdateState: 'update:state',
 } as const
+
+/** 应用内更新的状态。busy 表示探索会话正占着预览，此时不能重启安装 */
+export interface UpdateState {
+  phase: 'idle' | 'checking' | 'up-to-date' | 'available' | 'downloading' | 'downloaded' | 'error'
+  version: string
+  notes: string
+  percent: number
+  error: string
+  currentVersion?: string
+  busy?: boolean
+}
 
 export interface Bounds {
   x: number
@@ -152,6 +168,12 @@ export interface IpcInvokeMap {
    */
   [CH.uiStack]: { req: { front: 'ui' | 'preview' }; res: void }
 
+  /** manual=true：无论结果都要给用户反馈；自动检查安静失败 */
+  [CH.updateCheck]: { req: { manual?: boolean }; res: UpdateState }
+  [CH.updateDownload]: { req: void; res: UpdateState }
+  /** force=true 才允许在探索进行中重启（会中断探索） */
+  [CH.updateInstall]: { req: { force?: boolean }; res: UpdateState }
+
   [CH.graphUpdateNode]: { req: { id: string; patch: Record<string, unknown> }; res: void }
   [CH.graphUpdateEdge]: { req: { id: string; patch: Record<string, unknown> }; res: void }
   [CH.graphDeleteNode]: { req: { id: string }; res: void }
@@ -168,6 +190,7 @@ export interface IpcEventMap {
   [CH.evGraphPatch]: GraphPatch
   [CH.evPreviewNav]: NavState
   [CH.evWatchShot]: { nodeId: string; file: string }
+  [CH.evUpdateState]: UpdateState
 }
 
 export type InvokeChannel = keyof IpcInvokeMap

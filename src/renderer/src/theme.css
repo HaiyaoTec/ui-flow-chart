@@ -17,6 +17,13 @@
   --danger: #d4525e;
   /* 画布与预览各有一条工具栏，并排时高度必须一致，否则中缝两侧的分隔线错位 */
   --toolbar-h: 46px;
+  /* 控件尺寸规范：全应用只有两档。
+     常规档用于按钮、输入框、下拉；小档用于工具条里的次要开关与图标按钮。
+     高度统一由 min-height 保证，各处只调左右内边距，纵向内边距一律交给它，
+     否则字号一变高度就跟着变，成排的控件立刻参差不齐 */
+  --ctl-h: 32px;
+  --ctl-h-sm: 26px;
+  --ctl-r: 8px;
   color-scheme: dark;
 }
 
@@ -107,10 +114,12 @@ button {
   color: var(--fg);
   background: var(--panel-2);
   border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 7px 14px;
+  border-radius: var(--ctl-r);
+  /* 纵向留给 min-height，横向按需要调 */
+  min-height: var(--ctl-h);
+  padding: 0 14px;
   cursor: pointer;
-  transition: border-color 0.15s;
+  transition: background 0.15s;
 }
 /* 悬停反馈全局统一：只变颜色，不动边框。
    边框一变色，元素的轮廓就跟着"跳"一下，成排的按钮尤其明显；
@@ -160,9 +169,24 @@ textarea {
   color: var(--fg);
   background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 8px 11px;
+  border-radius: var(--ctl-r);
+  min-height: var(--ctl-h);
+  padding: 0 11px;
   width: 100%;
+}
+/* 勾选框不是文本输入，别把控件尺寸规范套到它头上——
+   套上去会被撑成 32px 见方，整条工具栏跟着变高 */
+input[type='checkbox'],
+input[type='radio'] {
+  width: auto;
+  min-height: 0;
+  padding: 0;
+  border-radius: 0;
+  accent-color: var(--accent);
+}
+/* 多行输入不能靠 min-height 定位文字，得给回纵向内边距 */
+textarea {
+  padding: 8px 11px;
 }
 /* 下拉框统一外观：关掉系统绘制，换成与自定义菜单（主题、项目切换）同一枚
    Lucide chevron，圆角、边框、悬停反馈也与按钮一致。
@@ -436,6 +460,28 @@ label.field > .hint {
   text-align: center;
   padding: 40px 0;
   font-size: 13px;
+}
+
+/* 弹层里的选中态：三个下拉（通用 Select、项目切换器、主题菜单）共用同一套表达。
+   左侧一条色条 + 底色加深，不再各自画勾——勾容易和右侧的状态徽标挤在一起，
+   而且三个弹层各画各的很难保持一致 */
+.ufc-select-pop button.on,
+.proj-pop-list button.on,
+.theme-pop button[aria-checked='true'] {
+  position: relative;
+  background: var(--panel-2);
+}
+.ufc-select-pop button.on::before,
+.proj-pop-list button.on::before,
+.theme-pop button[aria-checked='true']::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--accent);
 }
 
 /* 会话状态徽标：项目列表与工作台共用 */

@@ -4,6 +4,7 @@ import type { AiProfileMasked, AiProtocol, AiTestResult, AppSettings } from '@sh
 import Icon from '../components/Icon'
 import Modal from '../components/Modal'
 import Select from '../components/Select'
+import UpdateSection from '../components/UpdateSection'
 import { invoke } from '../ipc'
 
 const PROTOCOL_PRESETS: Record<AiProtocol, { label: string; baseUrl: string; model: string; hint: string }> = {
@@ -163,6 +164,8 @@ export default function SettingsView() {
           </label>
         </div>
       )}
+
+      <UpdateSection />
 
       <Modal
         title={editing ? '编辑配置' : '新建配置'}

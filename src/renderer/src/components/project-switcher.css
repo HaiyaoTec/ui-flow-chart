@@ -9,7 +9,8 @@
   gap: 8px;
   background: var(--panel-2);
   border-color: var(--line);
-  padding: 5px 10px 5px 6px;
+  min-height: var(--ctl-h);
+  padding: 0 10px 0 6px;
   max-width: 340px;
   transition:
     background 0.15s,
@@ -73,29 +74,16 @@
   text-align: left;
   background: transparent;
   border-color: transparent;
-  padding: 7px 8px;
-  border-radius: 8px;
+  min-height: var(--ctl-h);
+  /* 这是两行内容的列表项，不是单行控件，纵向要给回一点内边距 */
+  padding: 6px 8px;
+  border-radius: var(--ctl-r);
 }
 .proj-pop-list button:hover {
   background: var(--panel-2);
   border-color: transparent;
 }
-/* 当前项目：左侧色条 + 标题加粗。
-   原来右侧还画一个勾，与「已完成」这类状态徽标挤在一起，两个符号都看不清 */
-.proj-pop-list button.on {
-  background: var(--panel-2);
-  position: relative;
-}
-.proj-pop-list button.on::before {
-  content: '';
-  position: absolute;
-  left: 3px;
-  top: 8px;
-  bottom: 8px;
-  width: 3px;
-  border-radius: 999px;
-  background: var(--accent);
-}
+/* 选中态的样式统一在 theme.css 的 .is-selected 规则里，这里只补标题的强调 */
 .proj-pop-list button.on .nm {
   font-weight: 600;
   color: var(--accent);

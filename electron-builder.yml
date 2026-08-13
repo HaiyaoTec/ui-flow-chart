@@ -1,0 +1,46 @@
+appId: com.uiflowchart.app
+productName: UI Flow Chart
+copyright: Copyright © 2026 UI Flow Chart contributors
+
+directories:
+  output: release
+  buildResources: build
+
+# 只打构建产物：源码、测试、内置测试站都不进安装包
+files:
+  - out/**/*
+  - package.json
+  - '!**/*.map'
+
+# 依赖里只有 electron-updater 需要进包，其余（React 等）已被打进 out/
+npmRebuild: false
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  # 暂不做代码签名：首次安装会有 SmartScreen「未知发布者」提示，
+  # README 与 Release 说明里提供 SHA256 校验值。用户量起来后再上 EV 证书。
+  #
+  # 这项保持 true 是为了给 exe 写入图标与版本信息。代价是 electron-builder 要解压
+  # winCodeSign 工具包，其中含 macOS 的符号链接——Windows 上未开「开发者模式」时
+  # 创建符号链接需要管理员权限，本地打包会失败（CI 的 runner 有该权限，不受影响）。
+  # 本地要打包：开启开发者模式，或用管理员终端跑一次让缓存落地，
+  # 再或临时把这项设为 false（产出的 exe 会是 Electron 默认图标）。
+  signAndEditExecutable: true
+
+nsis:
+  oneClick: false
+  perMachine: false # 单用户安装，免 UAC 弹窗
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: UI Flow Chart
+  # 差量更新的块映射，能显著减小后续更新的下载量
+  differentialPackage: true
+
+# owner/repo 不写死：CI 与本地都从 git remote 推断，
+# 换仓库或 fork 后不需要改配置
+publish:
+  provider: github
+  releaseType: draft # 先发草稿，人工确认产物齐全再 Publish
