@@ -110,8 +110,16 @@ export default function DeviceFrame({
     if (box.clientWidth < 80 || box.clientHeight < 80) return
     const chrome = CHROME_RATIO[device.kind]
     const barH = device.kind === 'desktop' ? DESKTOP_BAR : 0
-    const availW = box.clientWidth
-    const availH = Math.max(60, box.clientHeight - barH)
+    /*
+     * 可用区先各让出 2px 再解方程。
+     *
+     * 装饰高度是由 frameMetrics 里一串 Math.round / Math.max 算出来的整数，
+     * 与这里按比例解出的理论值差着零点几像素；再把 w、h 取整一次，误差就够让
+     * 机身比容器高出 1px，flex 居中之后表现为顶部被切掉一线（CI 上必现，
+     * 本机窗口尺寸恰好躲过了）。宁可少 2px 也不能溢出。
+     */
+    const availW = box.clientWidth - 2
+    const availH = Math.max(60, box.clientHeight - barH - 2)
     // 以设备宽高比为准，取能塞进可用区域的最大尺寸。
     // 装饰是按屏幕宽度等比的，所以要连同装饰一起解方程：
     // 宽向 w·(1+chrome.x) ≤ 可用宽；纵向 h + chrome.y·w ≤ 可用高。
@@ -130,7 +138,8 @@ export default function DeviceFrame({
       w = device.width * zoom
       h = device.height * zoom
     }
-    setSize({ width: Math.round(w), height: Math.round(h) })
+    // 只能往小取：向上取整会把机身撑出容器
+    setSize({ width: Math.floor(w), height: Math.floor(h) })
     const layout = LAYOUT_RATIO[device.kind]
     setOverflow({
       x: w * (1 + layout.x) > box.clientWidth + 1,
