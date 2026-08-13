@@ -9,7 +9,7 @@
   "author": "UI Flow Chart contributors",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/OWNER/ui-flow-chart.git"
+    "url": "git+https://github.com/HaiyaoTec/ui-flow-chart.git"
   },
   "scripts": {
     "dev": "electron-vite dev",
