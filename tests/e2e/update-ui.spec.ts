@@ -58,10 +58,24 @@ test('探索进行中不能直接重启更新', async () => {
     })
     await openFirstProject(window)
     await ipc(window, 'session:start', { projectId: project.id, goal: 'x' }).catch(() => undefined)
-    await window.waitForTimeout(800)
 
-    const snap = await ipc<{ projectId: string | null; state: string }>(window, 'session:snapshot')
-    test.skip(snap.projectId !== project.id, `会话已结束（${snap.state}），无法验证占用`)
+    /*
+     * 把会话钉在 paused 上再断言。
+     *
+     * 本地 AI 地址不通时会话要过几秒才失败，CI 上快得多——先前只等固定时长再断言，
+     * 会话早就变成 failed，busy 自然是 false，用例随环境飘。
+     * paused 属于「占着预览」的状态，且不会自己往前走，是这里唯一稳定的落点。
+     */
+    const holding = ['launching', 'observing', 'thinking', 'acting', 'paused', 'awaiting_human', 'resuming']
+    let snap = await ipc<{ projectId: string | null; state: string }>(window, 'session:snapshot')
+    for (let i = 0; i < 20 && !holding.includes(snap.state); i++) {
+      await window.waitForTimeout(150)
+      snap = await ipc(window, 'session:snapshot')
+    }
+    test.skip(snap.projectId !== project.id || !holding.includes(snap.state), `会话已结束（${snap.state}），无法验证占用`)
+
+    snap = await ipc(window, 'session:pause')
+    test.skip(!holding.includes(snap.state), `会话未能暂停（${snap.state}）`)
 
     const st = await ipc<{ busy?: boolean }>(window, 'test:update-state', { phase: 'downloaded', version: '9.9.9' })
     expect(st.busy, '探索进行中应当标记为忙').toBe(true)
