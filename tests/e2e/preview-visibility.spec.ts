@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { getDevice } from '../../src/shared/devices'
-import { ipc, launchApp, openFirstProject, startTestSite, TEST_SITE } from './helpers'
+import { ipc, launchApp, openFirstProject, startTestSite, TEST_SITE, waitFor } from './helpers'
 
 /** 项目建出来时用的那台 430×932 机型，改设备清单后名字会变，从预设表里取 */
 const WIDE_IPHONE = getDevice('iphone-14-pro-max').name
@@ -38,10 +38,17 @@ test('弹层展开、面板收起、离开工作台时，原生视图都要让�
     await window.locator('.sidebar').getByRole('button', { name: /项目/ }).click()
     await window.waitForTimeout(600)
     await window.locator('.project-card').first().click()
-    // 「新矩形到达前不显示」是时序行为，直接断言会 flaky；
-    // 这里只守住结果：进来之后必须显示，且矩形是本次布局的（下面的断言会验证）
-    await window.waitForTimeout(2500)
-    expect(await visible(window), '进入工作台后视图应显示').toBe(true)
+    /*
+     * 「新矩形到达前不显示」是时序行为，直接断言会 flaky；这里只守住结果：
+     * 进来之后必须显示，且矩形是本次布局的（下面的断言会验证）。
+     *
+     * 用轮询而不是固定等待：主进程那侧的兜底释放本身就是 2500ms，
+     * 固定等 2500ms 等于卡在临界点上——mac runner 上就是这么挂的。
+     */
+    await waitFor(async () => await visible(window), 10000).catch(async () => {
+      const dbg = await ipc(window, 'test:preview-debug')
+      throw new Error(`进入工作台后视图应显示，实际一直没显示：${JSON.stringify(dbg)}`)
+    })
 
     // 自适应下机身必须完整落在可用区内。装饰（状态栏、边框、home 条）都是按屏幕
     // 宽度等比的，尺寸计算漏算它们就会让机身高出容器，被 overflow 从上下切掉，

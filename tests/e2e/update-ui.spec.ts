@@ -77,13 +77,17 @@ test('探索进行中不能直接重启更新', async () => {
     snap = await ipc(window, 'session:pause')
     test.skip(!holding.includes(snap.state), `会话未能暂停（${snap.state}）`)
 
-    const st = await ipc<{ busy?: boolean }>(window, 'test:update-state', { phase: 'downloaded', version: '9.9.9' })
+    const st = await ipc<{ busy?: boolean; manualOnly?: boolean }>(window, 'test:update-state', {
+      phase: 'downloaded',
+      version: '9.9.9',
+    })
     expect(st.busy, '探索进行中应当标记为忙').toBe(true)
 
-    // 不带 force 的安装请求必须被拒绝，并给出原因
+    // 不带 force 的安装请求必须被拒绝，并给出原因。
+    // macOS 的包未签名、压根不做应用内更新，拒绝的理由是另一条，但同样必须说清楚
     const after = await ipc<{ phase: string; error: string }>(window, 'update:install', {})
     expect(after.phase, '不该真的去安装').toBe('downloaded')
-    expect(after.error, '要说明为什么装不了').toContain('探索')
+    expect(after.error, '要说明为什么装不了').toContain(st.manualOnly ? '不支持应用内更新' : '探索')
 
     await ipc(window, 'session:stop').catch(() => undefined)
     await window.waitForTimeout(500)

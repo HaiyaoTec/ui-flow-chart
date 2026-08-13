@@ -18,10 +18,9 @@ jobs:
         with:
           node-version: 20
           cache: npm
+      # 不能跳过 electron 二进制下载：单测虽然不启动 Electron，但 migrate 那条链
+      # 会 import 到 electron 模块，而它的入口在二进制缺失时直接抛错
       - run: npm ci
-        env:
-          # 类型检查与单测都不启动 Electron，省掉每次 100MB 出头的二进制下载
-          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
       - run: npm run typecheck
       - run: npm test
 
