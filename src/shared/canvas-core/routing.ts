@@ -13,6 +13,13 @@ export interface DrawnEdge extends FlowEdge {
   anchor?: 'start' | 'end'
 }
 
+/** 第一条同列通道距卡片左缘的距离 */
+const CH_OFF = 46
+/** 通道之间的默认间距 */
+const CH_STEP = 34
+/** 通道的世界左边界下限：标注锚点为 chx - 8，取 32 能保证锚点不小于 24 */
+const CH_MIN_X = 32
+
 const bezMid = (p0: P, p1: P, p2: P, p3: P) => ({
   lx: (p0.x + 3 * p1.x + 3 * p2.x + p3.x) / 8,
   ly: (p0.y + 3 * p1.y + 3 * p2.y + p3.y) / 8,
@@ -98,6 +105,21 @@ export function routeEdges(edges: FlowEdge[], layout: LayoutResult): DrawnEdge[]
     return n
   }
 
+  /*
+   * 同列通道要先数清楚有几条，才能决定槽位间距。
+   *
+   * 原先是固定 34px 一条向左排开，第 0 列（x=MARGIN=110）排到第三条就跑到负坐标去了：
+   * SVG 会把负坐标的走线裁掉，而标注是 HTML 覆盖层不被裁，
+   * 看上去就是「一枚标注孤零零地待在画布外，旁边没有线」。
+   */
+  const chanKey = (from: string, toBelow: boolean) => `chan:${positions.get(from)!.col}:${toBelow}`
+  const chanTotal = new Map<string, number>()
+  for (const e of live) {
+    if (dirs.get(e.id) !== 'chan') continue
+    const k = chanKey(e.from, positions.get(e.to)!.y > positions.get(e.from)!.y)
+    chanTotal.set(k, (chanTotal.get(k) ?? 0) + 1)
+  }
+
   return live.map((e) => {
     const a = positions.get(e.from)!
     const b = positions.get(e.to)!
@@ -138,8 +160,14 @@ export function routeEdges(edges: FlowEdge[], layout: LayoutResult): DrawnEdge[]
 
     if (dir === 'chan') {
       const down = b.y > a.y
-      const n = slot(`chan:${a.col}:${down}`)
-      const chx = a.x - 46 - n * 34
+      const key = chanKey(e.from, down)
+      const n = slot(key)
+      const total = chanTotal.get(key) ?? 1
+      // 左边余量不够就压缩槽位间距，而不是让通道越过世界左边界。
+      // 余量充足时（col ≥ 1）step 恒为默认值，走线与改动前逐值一致
+      const room = a.x - CH_MIN_X - CH_OFF
+      const step = total > 1 ? Math.max(8, Math.min(CH_STEP, room / (total - 1))) : CH_STEP
+      const chx = Math.max(CH_MIN_X, a.x - CH_OFF - n * step)
       return {
         ...e,
         dir,

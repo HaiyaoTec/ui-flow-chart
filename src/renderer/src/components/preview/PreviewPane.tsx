@@ -66,6 +66,14 @@ export default function PreviewPane({
   deviceIdRef.current = deviceId
   const landscapeRef = useRef(landscape)
   landscapeRef.current = landscape
+  /**
+   * 当前「应当可见」的意愿。
+   *
+   * 切设备是个跨好几秒的异步过程（重放 override + 重载 + 自愈），收尾时要把视图放回来。
+   * 收尾里直接读 open 拿到的是发起那一刻的闭包值：这期间用户把「模拟设备」收起了，
+   * 收尾还是会按旧值把视图显示出来，于是网页浮在下面的日志上。
+   */
+  const wantVisibleRef = useRef(true)
 
   useEffect(
     () =>
@@ -116,7 +124,8 @@ export default function PreviewPane({
    * 宽度停留几帧，看起来就是网页越界压到了左边的画布上。
    */
   useEffect(() => {
-    showView(open && !suppressed)
+    wantVisibleRef.current = open && !suppressed
+    showView(wantVisibleRef.current)
   }, [open, suppressed])
 
   /**
@@ -225,7 +234,8 @@ export default function PreviewPane({
     } finally {
       setBusy(false)
       setSwitching(false)
-      showView(open && !suppressed)
+      // 读 ref 而不是闭包里的 open：切换期间用户可能已经把这一区块收起来了
+      showView(wantVisibleRef.current)
     }
   }
 

@@ -17,11 +17,19 @@ body.ufc-selectable .ufc-card .ufc-head{-webkit-user-select:text;user-select:tex
 .ufc-ah-primary{fill:var(--accent)}.ufc-ah-branch{fill:var(--branch)}
 .ufc-ah-back{fill:var(--back)}.ufc-ah-link{fill:var(--link)}
 
-.ufc-label{position:absolute;transform:translate(-50%,-50%);padding:3px 9px;border-radius:999px;
+/* --dy 是避让层写进来的纵向偏移。默认值必须写在这里：缺省时 var(--dy) 无效，
+   整条 transform 会失效，脚本执行之前标注要先跳一次位。
+   宽度封顶是为了长标注——录制出来的动作串能到上百字，不封顶必然横向溢出，
+   完整文本挂在 title 上 */
+.ufc-label{position:absolute;--dy:0px;transform:translate(-50%,calc(-50% + var(--dy)));
+  padding:3px 9px;border-radius:999px;
   background:var(--panel-2);border:1px solid var(--line);color:var(--fg);font-size:12px;white-space:nowrap;
+  max-width:300px;overflow:hidden;text-overflow:ellipsis;
   box-shadow:0 2px 10px rgba(0,0,0,.25);z-index:2}
-.ufc-label[data-anchor="end"]{transform:translate(-100%,-50%)}
-.ufc-label[data-anchor="start"]{transform:translate(0,-50%)}
+.ufc-label[data-anchor="end"]{transform:translate(-100%,calc(-50% + var(--dy)))}
+.ufc-label[data-anchor="start"]{transform:translate(0,calc(-50% + var(--dy)))}
+/* 左边放不下时由避让层翻边：整条改为从线的右侧 16px 起排 */
+.ufc-label[data-anchor="end"][data-flip="1"]{transform:translate(16px,calc(-50% + var(--dy)))}
 .ufc-label.branch{border-color:var(--branch);color:var(--branch)}
 .ufc-label.back{border-color:var(--back);color:var(--back)}
 .ufc-label.link{border-color:var(--link);color:var(--link)}

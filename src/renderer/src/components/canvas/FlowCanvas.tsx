@@ -30,10 +30,12 @@ export default function FlowCanvas({ graph, projectId, device, newNodeIds = [] }
   const isEmpty = layout.positions.size === 0
   const { zoom, zoomAt, fit, fitWidth, reset, focusNode } = usePanZoom(stageRef, worldRef)
 
-  // 版面变化后立刻做一次去重叠；用真实渲染矩形判定，所以必须在布局阶段跑
+  // 版面变化后立刻做一次去重叠；用真实渲染矩形判定，所以必须在布局阶段跑。
+  // 泳道显隐也要重跑：可见标注的集合变了，而 layout/edges 的引用没变，
+  // 不加这条依赖的话，重新显示出来的标注从没参与过碰撞判定
   useLayoutEffect(() => {
     deoverlapLabels()
-  }, [layout, edges, labelsOn])
+  }, [layout, edges, labelsOn, hiddenLanes])
 
   useEffect(() => {
     if (inited.current || layout.positions.size === 0) return
@@ -182,6 +184,8 @@ export default function FlowCanvas({ graph, projectId, device, newNodeIds = [] }
                   key={`l-${e.id}`}
                   className={`ufc-label ${e.type} ${off ? 'ufc-hidden' : ''}`}
                   data-anchor={e.anchor}
+                  // 标注宽度封顶到 300px，超出部分省略，完整文本靠 title 补上
+                  title={e.label}
                   style={{ left: e.lx, top: e.ly }}
                 >
                   {e.label}

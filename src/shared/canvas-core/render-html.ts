@@ -75,7 +75,7 @@ export function renderHtml(graph: FlowGraph, opts: RenderOptions): string {
   const labels = edges
     .map(
       (e) =>
-        `<div class="ufc-label ${esc(e.type)}"${e.anchor ? ` data-anchor="${e.anchor}"` : ''} style="left:${e.lx}px;top:${e.ly}px">${esc(e.label)}</div>`
+        `<div class="ufc-label ${esc(e.type)}"${e.anchor ? ` data-anchor="${e.anchor}"` : ''} title="${esc(e.label)}" style="left:${e.lx}px;top:${e.ly}px">${esc(e.label)}</div>`
     )
     .join('\n')
 
