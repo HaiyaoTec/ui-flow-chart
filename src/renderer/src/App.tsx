@@ -42,10 +42,13 @@ export default function App() {
     <div className="app">
       <aside className={`sidebar${navOpen ? '' : ' collapsed'}`}>
         <div className="sidebar-head">
-          {/* 收起时只留标记，展开才带文字 */}
-          <h1>
-            <Logo size={22} markOnly={!navOpen} />
-          </h1>
+          {/* 收起后这一行只剩 40px 可用，标记与折叠按钮挤不下，
+              标记会被裁成一条绿边；收起态就只留折叠按钮 */}
+          {navOpen && (
+            <h1>
+              <Logo size={22} />
+            </h1>
+          )}
           <button
             className="nav-toggle"
             onClick={() => setNavOpen((v) => !v)}

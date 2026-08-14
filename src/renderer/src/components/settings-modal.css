@@ -49,10 +49,24 @@
 .settings-rail button:hover:not(:disabled):not(.on) {
   background: color-mix(in srgb, var(--fg) 7%, var(--panel-2));
 }
-/* 选中态与侧边栏导航同一套：低饱和强调底，不换边框 */
+/* 选中态与侧边栏导航是同一套写法：低饱和强调底 + 左侧色条 + 图标转强调色。
+   两处都是「在几个板块之间切换」的导航，选中的表达方式必须一致，
+   只给一层浅底的话，跟悬停几乎分不出来 */
 .settings-rail button.on {
   background: var(--accent-soft);
   color: var(--fg);
+  position: relative;
+  font-weight: 500;
+}
+.settings-rail button.on::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: var(--accent);
 }
 /* 选中项的悬停只在自身底色上加深一档 */
 .settings-rail button.on:hover:not(:disabled) {

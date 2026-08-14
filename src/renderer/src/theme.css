@@ -316,12 +316,6 @@ label.field > .hint {
   min-width: 0;
   overflow: hidden;
 }
-/* 收起态只剩一个标记，居中放 */
-.sidebar.collapsed h1 {
-  margin: 0;
-  display: flex;
-  justify-content: center;
-}
 .nav-toggle {
   flex: none;
   padding: 6px;

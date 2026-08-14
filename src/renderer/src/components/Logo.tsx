@@ -2,7 +2,7 @@ import './logo.css'
 
 interface Props {
   size?: number
-  /** 只要标记、不要字，侧边栏收起时用 */
+  /** 只要标记、不要字 */
   markOnly?: boolean
 }
 
