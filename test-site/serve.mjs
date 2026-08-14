@@ -44,6 +44,24 @@ const server = createServer((req, res) => {
     return
   }
 
+  /*
+   * 可控延迟的页面。
+   *
+   * 预览「加载期间不许以陈旧矩形显示」这条约束，只有在加载慢到跨过兜底档位时
+   * 才可能被违反；本地测试站毫秒级返回，竞态窗口根本打不开。
+   */
+  if (url.pathname === '/slow.html') {
+    const ms = Math.min(Number(url.searchParams.get('ms') || 4000), 20000)
+    setTimeout(() => {
+      res.writeHead(200, { 'Content-Type': MIME['.html'], 'Cache-Control': 'no-store' })
+      res.end(
+        '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">' +
+          '<body style="margin:0;font:16px sans-serif">slow</body>'
+      )
+    }, ms)
+    return
+  }
+
   let rel = decodeURIComponent(url.pathname)
   if (rel === '/' || rel === '') rel = '/index.html'
   const file = join(ROOT, normalize(rel).replace(/^(\.\.[/\\])+/, ''))

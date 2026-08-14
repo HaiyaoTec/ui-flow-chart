@@ -53,6 +53,8 @@ export class PageDriver implements IPageDriver {
   /** 已装过请求头注入器的 partition，避免重复注册 */
   private identityPartition = ''
   private visible = true
+  /** 最近一次转为可见时的几何快照，见 setVisible */
+  private shownAt: { bounds: Bounds; scale: number } | null = null
   private onNav?: (url: string, loading: boolean) => void
   private onNavigated?: () => void
   private onCrash?: () => void
@@ -287,12 +289,20 @@ export class PageDriver implements IPageDriver {
   }
 
   setVisible(visible: boolean): void {
+    // 记下「由隐藏转为可见」那一刻的几何：错位是一个时序问题，
+    // 事后采样抢不到那一帧，只有把它存成状态才能被断言
+    if (visible && !this.visible) this.shownAt = { bounds: { ...this.bounds }, scale: this.inputScale }
     this.visible = visible
     this.rawView?.setVisible(visible)
   }
 
   isVisible(): boolean {
     return this.visible
+  }
+
+  /** 视图最近一次由隐藏转为可见时的 bounds 与 CDP scale */
+  lastShownGeometry(): { bounds: Bounds; scale: number } | null {
+    return this.shownAt
   }
 
   /**

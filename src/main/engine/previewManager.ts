@@ -9,6 +9,16 @@ import { getUiContents, getUiView } from '../window'
  * 预览视图的持有者。抓取与真机预览共用同一个 view——
  * AI 驱动时它是被自动操作的页面，人工接管时它就是操作台，中间无需切换。
  */
+/** hold 的常规等待档：到点仍未把新矩形落到视图上，就催渲染进程重报一次 */
+const HOLD_SOFT_MS = 2500
+/** 非 open 场景（窗口缩放、面板展开）的绝对期限 */
+const HOLD_MAX_MS = 5000
+/**
+ * open 场景的绝对期限。要高于 goto 的最坏预算，到点强制放行是
+ * 「预览永久空白」的最后一道防线。
+ */
+const HOLD_OPEN_MAX_MS = 20000
+
 export class PreviewManager {
   readonly driver = new PageDriver()
   private win: BaseWindow | null = null
@@ -31,8 +41,27 @@ export class PreviewManager {
   private awaitTimer: NodeJS.Timeout | null = null
   /** 正在切换设备：这期间任何「新矩形到了」都不放行视图 */
   private switching = false
-  /** 本轮 hold 之后是否已经收到过新矩形。没有就不能拿旧矩形把视图亮出来 */
-  private paneFresh = false
+  /**
+   * 本轮 hold 之后是否收到过新矩形。只用来决定要不要催重报，不作为放行判据——
+   * open 期间的上报只更新 this.pane，视图上仍是 open 入口的那份快照。
+   */
+  private paneReceived = false
+  /**
+   * 最新矩形连同同源 fit 是否已经真的落到视图上。这才是放行的唯一判据。
+   * 「收到过矩形」与「矩形已生效」必须分开：混为一谈正是网页在加载期间
+   * 以旧矩形浮在画布上的根因。
+   */
+  private paneApplied = false
+  /** 本轮 hold 的绝对期限 */
+  private holdDeadline = 0
+  /**
+   * open() 的代次令牌。
+   *
+   * registry 那边是 void preview.open(...)，没有串行化，崩溃自愈与导航也会调它，
+   * 两次交叠是可达路径。只有最后一次 open 有权清 opening 与放行视图，
+   * 否则先发起的那次会在后发起的那次进行中把闸门打开。
+   */
+  private openGen = 0
   /** 视口同步的串行队列 */
   private applyChain: Promise<void> = Promise.resolve()
   /** 解绑当前窗口 resize 监听的函数 */
@@ -95,6 +124,7 @@ export class PreviewManager {
   /** 打开目标站。每次都重建 view 并在导航前铺好 override */
   async open(url: string, device: DeviceSpec, partition: string): Promise<void> {
     if (!this.win) throw new Error('主窗口尚未就绪')
+    const gen = ++this.openGen
     this.device = device
     this.partition = partition
     this.opening = true
@@ -106,7 +136,7 @@ export class PreviewManager {
     const fit = this.scaleFor(paneAtOpen)
     const trace = (s: string) => process.env.UFC_TRACE === '1' && console.log(`[preview] ${s}`)
 
-    this.holdUntilPane()
+    this.holdUntilPane(HOLD_OPEN_MAX_MS)
 
     try {
       trace('create view')
@@ -132,16 +162,27 @@ export class PreviewManager {
       trace('goto done')
       this.lastUrl = url
     } finally {
-      this.opening = false
+      /*
+       * 收尾必须在成功与抛错两条路径上都执行。
+       *
+       * 早先这几步写在 try/finally 之外：goto 抛错（域名解析失败、连接被拒）时
+       * 视图会永远停在 open 入口的快照矩形上，不再自己恢复。
+       *
+       * 顺序不能调换：syncViewport 与 setPaneBounds 都以 opening 自锁，
+       * 必须先清 opening 再同步；放行必须排在同步之后，
+       * 否则只是把「拿陈旧矩形亮相」挪个地方重演一遍。
+       */
+      if (gen === this.openGen) {
+        this.opening = false
+        // 首次落地后核对一次：模拟没生效就自己纠正，别让用户看着 PC 布局发懵
+        const heal = await this.verifyAndHeal().catch(() => null)
+        if (heal?.healed) trace(`设备模拟未生效（scrollWidth=${heal.scrollWidth}），已重放并重载`)
+        // 打开期间挡掉的 bounds 上报，这里补一次。走内部同步而不是 setPaneBounds
+        await this.syncViewport(true)
+        this.releasePane()
+        this.emitNav()
+      }
     }
-    // 首次落地后核对一次：模拟没生效就自己纠正，别让用户看着 PC 布局发懵
-    const heal = await this.verifyAndHeal().catch(() => null)
-    if (heal?.healed) trace(`设备模拟未生效（scrollWidth=${heal.scrollWidth}），已重放并重载`)
-    // 打开期间挡掉的 bounds 上报，这里补一次。
-    // 注意走内部同步而不是 setPaneBounds——那会把「等待新矩形」的标记
-    // 用旧矩形提前解除，视图又会在错误的位置闪一下
-    await this.syncViewport(true)
-    this.emitNav()
   }
 
   /**
@@ -191,8 +232,8 @@ export class PreviewManager {
     // 采信它会把原生视图摆到设备外框之外
     if (b.width < 80 || b.height < 80) return
     this.pane = { x: b.x, y: b.y, width: b.width, height: b.height }
-    // 这是本轮真正等到的新矩形，兜底超时可以放心放行了
-    this.paneFresh = true
+    // 只是「收到了」。是否已经落到视图上由 syncViewport 里的 paneApplied 说了算
+    this.paneReceived = true
     // 用户手动指定了缩放时，矩形可能是裁切过的，反推不出比例，只能采信上报值
     this.paneScale = typeof b.scale === 'number' && b.scale > 0 ? b.scale : null
     if (!this.driver.attached || this.opening) return
@@ -207,26 +248,53 @@ export class PreviewManager {
    * 用在两处：打开新目标（否则会拿上一次的矩形先画一帧），
    * 以及窗口缩放（原生视图跟不上窗口边框，右侧会拖出一条黑边）。
    */
-  private holdUntilPane(): void {
+  private holdUntilPane(maxMs = HOLD_MAX_MS): void {
     this.awaitingPane = true
-    this.paneFresh = false
+    this.paneReceived = false
+    this.paneApplied = false
     this.driver.setVisible(false)
+    this.holdDeadline = Date.now() + maxMs
+    this.armHoldTimer(HOLD_SOFT_MS)
+  }
+
+  private armHoldTimer(ms: number): void {
     if (this.awaitTimer) clearTimeout(this.awaitTimer)
-    this.awaitTimer = setTimeout(() => this.onHoldTimeout(), 2500)
+    this.awaitTimer = setTimeout(() => this.onHoldTimeout(), ms)
   }
 
   /**
-   * 兜底超时。
+   * 兜底超时。四条分支，从高到低：
    *
-   * 关键是「没等到新矩形就不能亮」：从真机预览页进项目时，上一次的矩形是那一页的
-   * 大矩形（贴着左边、几乎占满），拿它把视图亮出来，网页就会盖在侧边栏和画布上，
-   * 等渲染进程报来新矩形才归位——正是「过一会自己恢复」的那个现象。
-   * 所以先催渲染进程重报一次，仍然没有再放行。
+   * 1. 超过绝对期限：把几何夹回当前占位矩形后强制放行，杜绝永久空白。
+   * 2. open 仍在进行：不放行。此刻视图上是 open 入口的快照矩形，
+   *    放行等于把网页画在上一次布局的位置上——正是「网页浮在画布上」那个现象。
+   *    正常放行由 open() 收尾负责。
+   * 3. 新矩形已经落到视图上：放行。
+   * 4. 矩形一直没来（面板收起、组件还没挂载）：催重报一次，再等一档。
    */
   private onHoldTimeout(): void {
-    if (this.paneFresh) return this.releasePane()
-    this.emitNav()
-    this.awaitTimer = setTimeout(() => this.releasePane(), 2500)
+    if (Date.now() >= this.holdDeadline) return this.forceRelease()
+    if (this.opening) return this.armHoldTimer(500)
+    if (this.paneApplied) return this.releasePane()
+    if (!this.paneReceived) this.emitNav()
+    this.armHoldTimer(HOLD_SOFT_MS)
+  }
+
+  /**
+   * 超期强制放行。
+   *
+   * 放行前先把视图夹回当前占位矩形。此时可能仍在 open 中，不能发 CDP
+   * （并发的 Emulation 命令会打断导航），所以按已经下发的 scale 重算 bounds：
+   * applyBounds 的溢出分支会把视图截到 pane 之内，最坏是手机屏里的页面被裁掉一块，
+   * 但绝不会跑到画布上。缩放由 open() 收尾的 syncViewport 补齐。
+   */
+  private forceRelease(): void {
+    if (this.switching) return
+    if (this.driver.attached) {
+      this.applyBounds(this.pane, this.driver.currentScale())
+      this.driver.repaint()
+    }
+    this.releasePane()
   }
 
   private releasePane(): void {
@@ -262,6 +330,9 @@ export class PreviewManager {
         // 尺寸一变就作废整帧：不主动重绘的话，合成器会把旧图块铺满新尺寸，
         // 表现为同一屏内容在框里重复好几遍
         this.driver.repaint()
+        // 到这里矩形才算真的落到视图上。标记只能置在这个分支里——
+        // 顶部那个 opening 早退是 resolve 不是 reject，放在链外等于没判
+        this.paneApplied = true
       })
       .catch(() => {
         /* 单次同步失败不影响后续 */
@@ -287,6 +358,17 @@ export class PreviewManager {
       }
     }
     this.wantVisible = visible
+    /*
+     * 转为可见、但最新矩形还没落到视图上时，重新进入等待，由 setPaneBounds 放行。
+     *
+     * 「模拟设备」收起期间舞台是 display:none，DeviceFrame 的测量被 80px 门槛挡掉、
+     * 完全不上报，视图上还是收起之前那份矩形；直接显示就会先在旧位置画一帧。
+     * awaitingPane 为真时（open 进行中）不重入，免得把 open 的绝对期限缩短。
+     */
+    if (visible && !this.awaitingPane && !this.paneApplied && this.driver.attached) {
+      this.holdUntilPane()
+      return { image }
+    }
     // 等待新矩形期间只记意愿，不真的显示——否则又会在旧位置画一帧
     this.driver.setVisible(visible && !this.awaitingPane)
     return { image }
@@ -323,6 +405,7 @@ export class PreviewManager {
     bounds: Bounds | null
     visible: boolean
     expected: { width: number; height: number }
+    shownAt: { bounds: Bounds; scale: number } | null
   } {
     return {
       device: { width: this.device.width, height: this.device.height },
@@ -330,6 +413,8 @@ export class PreviewManager {
       fit: this.driver.currentScale(),
       bounds: this.driver.currentBounds(),
       visible: this.driver.isVisible(),
+      // 首次显示那一刻的几何：错位是时序问题，事后采样抢不到，只能存下来断言
+      shownAt: this.driver.lastShownGeometry(),
       // 放大到超出面板时视图会被截断，「应为」也要按可见范围取，否则自检永远报异常
       expected: {
         width: Math.min(Math.round(this.device.width * this.driver.currentScale()), this.pane.width),

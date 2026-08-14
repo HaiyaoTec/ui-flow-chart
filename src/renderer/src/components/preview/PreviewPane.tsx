@@ -72,7 +72,9 @@ export default function PreviewPane({
       on(CH.evPreviewNav, (s) => {
         setNav(s)
         // 主进程刚重建过视图，它在等新矩形才肯显示。矩形可能一模一样、不会自然重报，
-        // 这里主动催一次，免得白等兜底超时
+        // 这里主动催一次。去重键必须一并清掉——lastRect 是跨挂载常驻的 ref，
+        // 不清的话 DeviceFrame 重报出来的相同矩形会在这里被吃掉，催报等于没做
+        lastRect.current = ''
         setReportNonce((n) => n + 1)
       }),
     []
