@@ -14,9 +14,12 @@
   type SessionSnapshot,
   type SessionState,
 } from '@shared/types'
-import type { IAiClient } from '../ai/types'
+import type { IAiClient, ReviewTask } from '../ai/types'
 import { ActionParseError } from '../ai/parseAction'
-import { describeFinalize, finalizeGraph } from './finalize'
+import { sanitizeEdgeReview, sanitizeLaneAssignments } from '../ai/parseReview'
+import { buildEdgeReviewTask, buildLaneClassifyTask } from '../ai/reviewPrompt'
+import { describeFinalize, finalizeGraph, type AiVerdict } from './finalize'
+import { inheritLanes, planCleanup } from './graphCleanup'
 import { GraphStore } from './graphStore'
 import { delay, type PageDriver } from './PageDriver'
 import { signatureHash } from './signature'
@@ -637,19 +640,79 @@ export class ExplorerSession {
    */
   private async finalizeAndFinish(): Promise<void> {
     this.setState('finishing')
-    this.runFinalize()
+    const verdict = await this.askAiToReview().catch(() => undefined)
+    this.runFinalize(verdict)
     this.toFinished()
+  }
+
+  /**
+   * 收尾的 AI 那一层：把人工接管的界面归类、在重复连线里挑该留的。
+   *
+   * 两件事分两次问：输入完全不同，一次失败不该拖累另一次，而且两个小请求
+   * 比一个大请求更不容易被 max_tokens 截断。
+   * 全程失败即回落——确定性层已经把八成的事情做完了，这里只是锦上添花，
+   * 所以不重试、超时也比每步决策短一半。
+   */
+  private async askAiToReview(): Promise<AiVerdict | undefined> {
+    const store = this.store
+    if (!store || this.stopRequested) return undefined
+    // 预算耗尽后仍允许收尾用两次，否则「跑满额度 → 结束」这条最常见的路径永远享受不到整理
+    if (this.aiCalls > this.budgets.maxAiCalls + 8) return undefined
+
+    const graph = store.get()
+    const verdict: AiVerdict = {}
+
+    const candidates = graph.nodes.filter((n) => n.lane === MANUAL_LANE_ID).map((n) => n.id)
+    const inherited = inheritLanes(graph)
+    if (candidates.length) {
+      const known = new Set(graph.lanes.map((l) => l.id).filter((id) => id !== MANUAL_LANE_ID))
+      const out = await this.runReview(buildLaneClassifyTask(graph, candidates, inherited), '归类')
+      if (out) {
+        const s = sanitizeLaneAssignments(out.assignments, candidates, inherited, known)
+        verdict.lanes = s.lanes
+        verdict.laneTitles = s.titles
+        if (s.rejected) this.log('warn', `归类结果有 ${s.rejected} 条不符合约束，已按上游泳道归类`)
+      }
+    }
+
+    const groups = planCleanup(graph).groups
+    if (groups.length && !this.stopRequested) {
+      const out = await this.runReview(buildEdgeReviewTask(graph, groups), '连线审查')
+      if (out) {
+        const s = sanitizeEdgeReview(out.groups, groups)
+        verdict.dropEdgeIds = s.dropIds
+        verdict.relabel = s.relabel
+        if (s.rejected) this.log('warn', `连线审查有 ${s.rejected} 组不符合约束，已保留原状`)
+      }
+    }
+
+    return verdict
+  }
+
+  /** 单次收尾问询。失败只记一行日志，绝不向上抛 */
+  private async runReview<T>(task: ReviewTask<T>, what: string): Promise<T | null> {
+    // 接管期 this.abort 是 null，不挂上去的话用户点结束要干等到超时
+    this.abort = new AbortController()
+    this.aiCalls += 1
+    try {
+      return await this.deps.ai.review(task, this.abort.signal)
+    } catch (e) {
+      this.log('warn', `收尾${what}未完成：${e instanceof Error ? e.message : String(e)}，已按确定性规则整理`)
+      return null
+    } finally {
+      this.abort = null
+    }
   }
 
   /**
    * 确定性收尾。整个包在 try 里：图整理失败也不该让一轮成功的探索显示成中断。
    * 只跑一次——loop 的正常出口与 catch 分支都会调它。
    */
-  private runFinalize(): void {
+  private runFinalize(verdict?: AiVerdict): void {
     if (this.finalizeDone || !this.store) return
     this.finalizeDone = true
     try {
-      const r = finalizeGraph(this.store)
+      const r = finalizeGraph(this.store, verdict)
       this.log('info', describeFinalize(r))
       if (r.merged || r.dropped) {
         this.store.appendSession({ kind: 'cleanup', merged: r.merged, dropped: r.dropped, moved: r.moved })

@@ -1,7 +1,7 @@
 import type { AiAction, AiDecideInput, AiProfile, AiTestResult } from '@shared/types'
 import { parseAction } from './parseAction'
-import { buildUserText, JSON_ONLY_HINT, SYSTEM_PROMPT } from './prompt'
-import { AiError, PIXEL_JPEG_BASE64, withTimeout, type IAiClient } from './types'
+import { buildUserText, JSON_ONLY_HINT, jsonOnlyHint, SYSTEM_PROMPT } from './prompt'
+import { AiError, PIXEL_JPEG_BASE64, withTimeout, type IAiClient, type ReviewTask } from './types'
 
 interface ChatChoice {
   message?: { content?: string | null }
@@ -89,23 +89,55 @@ export class OpenAiProvider implements IAiClient {
     return body
   }
 
-  async decide(input: AiDecideInput, signal?: AbortSignal): Promise<AiAction> {
+  /** 服务端不认 response_format 时降级重试一次。标志位是实例级的，两个入口共享 */
+  private async postWithJsonFallback(
+    bodyOf: (jsonMode: boolean) => unknown,
+    timeoutMs: number,
+    signal?: AbortSignal
+  ): Promise<ChatResponse> {
     const useJsonMode = !this.jsonModeUnsupported
-    let json: ChatResponse
     try {
-      json = await this.post(this.buildBody(input, useJsonMode), 90_000, signal)
+      return await this.post(bodyOf(useJsonMode), timeoutMs, signal)
     } catch (e) {
-      // 服务端不认 response_format 时降级重试一次
       if (useJsonMode && e instanceof AiError && e.status === 400) {
         this.jsonModeUnsupported = true
-        json = await this.post(this.buildBody(input, false), 90_000, signal)
-      } else {
-        throw e
+        return this.post(bodyOf(false), timeoutMs, signal)
       }
+      throw e
     }
+  }
+
+  async decide(input: AiDecideInput, signal?: AbortSignal): Promise<AiAction> {
+    const json = await this.postWithJsonFallback((m) => this.buildBody(input, m), 90_000, signal)
     const content = json.choices?.[0]?.message?.content ?? ''
     if (!content.trim()) throw new AiError('模型返回空内容')
     return parseAction(content)
+  }
+
+  /**
+   * 纯文本问询。不能复用 buildBody——它无条件拼一张截图，
+   * 收尾整理要问的是一批已经录好的界面，带图既没必要又容易撑爆上下文。
+   */
+  async review<T>(task: ReviewTask<T>, signal?: AbortSignal): Promise<T> {
+    const bodyOf = (jsonMode: boolean): Record<string, unknown> => {
+      const body: Record<string, unknown> = {
+        model: this.profile.model,
+        temperature: 0,
+        max_tokens: task.maxTokens,
+        messages: [
+          { role: 'system', content: `${task.system}
+
+${jsonOnlyHint(task.schema)}` },
+          { role: 'user', content: task.user },
+        ],
+      }
+      if (jsonMode) body.response_format = { type: 'json_object' }
+      return body
+    }
+    const json = await this.postWithJsonFallback(bodyOf, task.timeoutMs, signal)
+    const content = json.choices?.[0]?.message?.content ?? ''
+    if (!content.trim()) throw new AiError('模型返回空内容')
+    return task.parse(content)
   }
 
   async testConnection(signal?: AbortSignal): Promise<AiTestResult> {

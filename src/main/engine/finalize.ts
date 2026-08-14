@@ -11,7 +11,7 @@ export interface FinalizeResult {
   moved: number
   /** 回收的空泳道 */
   prunedLanes: string[]
-  /** 留给 AI 审阅的候选组，AI 不可用时为空数组 */
+  /** 清理计划。其中的候选组供 AI 审阅 */
   plan: CleanupPlan
   patch: Omit<GraphPatch, 'projectId'>
 }
@@ -26,14 +26,28 @@ export interface FinalizeResult {
  * 顺序不可调换：写泳道 → 回收空泳道 → 重排 → 落盘。空泳道会占一整行卡片高度，
  * 必须在重排之前清掉；而改了泳道不重排，两张卡片会精确落在同一格上互相重叠。
  */
-export function finalizeGraph(store: GraphStore, laneOverrides?: Map<string, string>): FinalizeResult {
+export interface AiVerdict {
+  /** AI 归类的结果，已经过白名单裁剪 */
+  lanes?: Map<string, string>
+  /** 新泳道的中文名 */
+  laneTitles?: Map<string, string>
+  /** AI 判定可以删掉的重复连线 */
+  dropEdgeIds?: string[]
+  /** AI 改写的标注 */
+  relabel?: Map<string, string>
+}
+
+export function finalizeGraph(store: GraphStore, ai?: AiVerdict): FinalizeResult {
   const graph = store.get()
+  const laneOverrides = ai?.lanes
 
   /* A1 + A2：清边 */
   const plan = planCleanup(graph)
   const mergedIds = plan.merges.flatMap((m) => m.mergedIds)
   for (const m of plan.merges) store.updateEdge(m.keep.id, { label: m.keep.label, type: m.keep.type })
-  const removedEdgeIds = store.removeEdges([...plan.dropIds, ...mergedIds])
+  // AI 只能在候选组里挑，挑剩的一并删掉；改写的标注也在这里落地
+  for (const [id, label] of ai?.relabel ?? []) store.updateEdge(id, { label })
+  const removedEdgeIds = store.removeEdges([...plan.dropIds, ...mergedIds, ...(ai?.dropEdgeIds ?? [])])
 
   /* A3：人工接管节点归位。调用方给了 AI 的结论就用它，没给就用继承值 */
   const inherited = inheritLanes(graph)
@@ -43,7 +57,7 @@ export function finalizeGraph(store: GraphStore, laneOverrides?: Map<string, str
     const node = graph.nodes.find((n) => n.id === nodeId)
     if (!node || node.lane === lane) continue
     // 目标泳道可能还不存在（AI 新建的）
-    store.ensureLane(lane, lane)
+    store.ensureLane(lane, ai?.laneTitles?.get(lane) ?? lane)
     store.updateNode(nodeId, { lane })
     moved += 1
   }

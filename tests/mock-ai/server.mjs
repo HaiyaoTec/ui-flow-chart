@@ -199,6 +199,56 @@ function decide(text) {
   }
 }
 
+/**
+ * 收尾整理的两个问询。
+ *
+ * 必须在 callCount 自增之前分派：那个计数器是 badjson / flaky 的故障注入位置，
+ * 多一类请求就会把注入点顶到别的调用上。
+ * Anthropic 的 system 是顶层字段，extractUserText 读不到，所以优先按工具名判定。
+ */
+function reviewKind(body, text) {
+  const tools = (body.tools ?? []).map((t) => t.name)
+  if (tools.includes('classify_lanes') || /## 待归类的界面/.test(text)) return 'classify_lanes'
+  if (tools.includes('review_edges') || /## 待审查的连线组/.test(text)) return 'review_edges'
+  return null
+}
+
+/**
+ * 归类应答。
+ *
+ * 刻意把其中一个界面归到与继承值不同的新泳道（verify / 安全验证）——
+ * 这样断言才能区分「AI 归类真的生效」与「只是继承回落生效」。
+ */
+function classifyLanes(text) {
+  const assignments = []
+  for (const m of text.matchAll(/^ {2}(manual-\d+)$/gm)) {
+    const nodeId = m[1]
+    assignments.push(
+      nodeId === 'manual-1'
+        ? { nodeId, lane: 'verify', laneTitle: '安全验证', confidence: 'high' }
+        : { nodeId, lane: 'login', confidence: 'high' }
+    )
+  }
+  return { assignments }
+}
+
+/** 审边应答：每组只留第一条 */
+function reviewEdges(text) {
+  const groups = []
+  let cur = null
+  for (const line of text.split(String.fromCharCode(10))) {
+    const g = line.match(/^ {2}(g\d+)：/)
+    if (g) {
+      cur = { groupId: g[1], keep: [] }
+      groups.push(cur)
+      continue
+    }
+    const e = line.match(/^ {4}- ([^｜]+)｜/)
+    if (e && cur && cur.keep.length === 0) cur.keep.push(e[1].trim())
+  }
+  return { groups: groups.filter((g) => g.keep.length) }
+}
+
 function extractUserText(body) {
   // OpenAI 形状
   const msgs = body.messages ?? []
@@ -214,7 +264,6 @@ const server = createServer((req, res) => {
   let raw = ''
   req.on('data', (c) => (raw += c))
   req.on('end', () => {
-    callCount += 1
     let body = {}
     try {
       body = JSON.parse(raw || '{}')
@@ -223,6 +272,26 @@ const server = createServer((req, res) => {
     }
     const text = extractUserText(body)
     const isAnthropic = req.url.includes('/messages')
+
+    // 收尾问询先分派，不参与 callCount 的故障注入，也不打乱探索的进度计数
+    const kind = reviewKind(body, text)
+    if (kind) {
+      if (SCENARIO === 'reviewfail') {
+        const bad = isAnthropic
+          ? { content: [{ type: 'text', text: '收尾整理失败（模拟）' }] }
+          : { choices: [{ message: { content: '收尾整理失败（模拟）' } }] }
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        return res.end(JSON.stringify(bad))
+      }
+      const out = kind === 'classify_lanes' ? classifyLanes(text) : reviewEdges(text)
+      const payload = isAnthropic
+        ? { content: [{ type: 'tool_use', name: kind, input: out }], model: body.model }
+        : { choices: [{ message: { content: JSON.stringify(out) } }], model: body.model }
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      return res.end(JSON.stringify(payload))
+    }
+
+    callCount += 1
 
     // 故障注入：第二次调用返回坏 JSON，验证解析重试与降级
     if (SCENARIO === 'badjson' && callCount === 2) {

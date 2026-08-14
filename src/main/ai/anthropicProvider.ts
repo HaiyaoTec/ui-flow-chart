@@ -1,7 +1,7 @@
 import type { AiAction, AiDecideInput, AiProfile, AiTestResult } from '@shared/types'
 import { parseAction, parseActionObject } from './parseAction'
 import { ACTION_JSON_SCHEMA, buildUserText, SYSTEM_PROMPT } from './prompt'
-import { AiError, PIXEL_JPEG_BASE64, withTimeout, type IAiClient } from './types'
+import { AiError, PIXEL_JPEG_BASE64, withTimeout, type IAiClient, type ReviewTask } from './types'
 
 interface AnthropicContent {
   type: string
@@ -107,6 +107,34 @@ export class AnthropicProvider implements IAiClient {
     const text = json.content?.map((c) => c.text ?? '').join('\n') ?? ''
     if (!text.trim()) throw new AiError('模型既未返回工具调用也未返回文本')
     return parseAction(text)
+  }
+
+  /**
+   * 纯文本问询。工具名取自 task，不复用 TOOL_NAME——
+   * 那个常量被 tools、tool_choice、结果查找三处引用，动它会把动作调用一起改坏。
+   */
+  async review<T>(task: ReviewTask<T>, signal?: AbortSignal): Promise<T> {
+    const json = await this.post(
+      {
+        model: this.profile.model,
+        max_tokens: task.maxTokens,
+        temperature: 0,
+        system: task.system,
+        tools: [{ name: task.name, description: task.description, input_schema: task.schema }],
+        tool_choice: { type: 'tool', name: task.name },
+        messages: [{ role: 'user', content: [{ type: 'text', text: task.user }] }],
+      },
+      task.timeoutMs,
+      signal
+    )
+
+    const toolUse = json.content?.find((c) => c.type === 'tool_use' && c.name === task.name)
+    if (toolUse?.input) return task.parseObject(toolUse.input)
+
+    // 中转网关不支持 tools 时退回文本解析，与 decide 同一套兜底
+    const text = json.content?.map((c) => c.text ?? '').join('\n') ?? ''
+    if (!text.trim()) throw new AiError('模型既未返回工具调用也未返回文本')
+    return task.parse(text)
   }
 
   async testConnection(signal?: AbortSignal): Promise<AiTestResult> {

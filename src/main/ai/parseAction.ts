@@ -48,36 +48,56 @@ export class ActionParseError extends Error {
   }
 }
 
+const detailOf = (e: unknown): string =>
+  e instanceof z.ZodError ? e.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') : String(e)
+
 /**
- * 从模型输出里抠出 JSON 并校验。
+ * 从模型输出里抠出 JSON 并按 schema 校验。
+ *
  * 模型经常把 JSON 包在 markdown 代码块里、或前后带解释文字，这里逐层降级容错。
+ * 泛型化是为了让收尾整理的两个任务（归类、审边）共用同一套抽取与降级，
+ * 不必各写一遍。
  */
-export function parseAction(raw: string): AiAction {
+export function parseWithSchema<S extends z.ZodTypeAny>(raw: string, schema: S, label: string): z.output<S> {
   const candidates = extractJsonCandidates(raw)
-  if (candidates.length === 0) throw new ActionParseError('输出中找不到 JSON 对象', raw)
+  if (candidates.length === 0) throw new ActionParseError(`${label}：输出中找不到 JSON 对象`, raw)
 
   let lastErr: unknown
   for (const text of candidates) {
     try {
-      const parsed = actionSchema.parse(JSON.parse(text))
-      return normalize(parsed as AiAction)
+      return schema.parse(JSON.parse(text))
     } catch (e) {
       lastErr = e
     }
   }
-  const detail = lastErr instanceof z.ZodError ? lastErr.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') : String(lastErr)
-  throw new ActionParseError(`JSON 不符合动作结构：${detail}`, raw)
+  throw new ActionParseError(`${label}：JSON 不符合结构——${detailOf(lastErr)}`, raw)
+}
+
+/** 已经是对象（强制工具调用的场景）时直接校验 */
+export function parseObjectWithSchema<S extends z.ZodTypeAny>(obj: unknown, schema: S, label: string): z.output<S> {
+  try {
+    return schema.parse(obj)
+  } catch (e) {
+    throw new ActionParseError(`${label}：工具调用参数不符合结构——${detailOf(e)}`, JSON.stringify(obj))
+  }
+}
+
+export function parseAction(raw: string): AiAction {
+  return normalize(parseWithSchema(raw, actionSchema, '动作') as AiAction)
 }
 
 /** 已经是对象（Anthropic 强制工具调用的场景）时直接校验 */
 export function parseActionObject(obj: unknown): AiAction {
-  try {
-    return normalize(actionSchema.parse(obj) as AiAction)
-  } catch (e) {
-    const detail = e instanceof z.ZodError ? e.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') : String(e)
-    throw new ActionParseError(`工具调用参数不符合动作结构：${detail}`, JSON.stringify(obj))
-  }
+  return normalize(parseObjectWithSchema(obj, actionSchema, '动作') as AiAction)
 }
+
+/** 泳道 id 的口径与动作 schema 里的 transform 保持一致 */
+export const slugify = (s: string): string =>
+  s
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
 
 function normalize(a: AiAction): AiAction {
   const out = { ...a }

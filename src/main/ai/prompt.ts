@@ -105,5 +105,9 @@ export const ACTION_JSON_SCHEMA = {
   required: ['action', 'reason', 'screen', 'edgeLabel'],
 } as const
 
-export const JSON_ONLY_HINT = `只输出一个 JSON 对象，不要有任何解释文字或 markdown 代码块标记。对象结构：
-${JSON.stringify(ACTION_JSON_SCHEMA, null, 2)}`
+/** 结构提示。OpenAI 侧没有强制工具调用，只能把 schema 写进提示词 */
+export const jsonOnlyHint = (schema: unknown): string =>
+  `只输出一个 JSON 对象，不要有任何解释文字或 markdown 代码块标记。对象结构：
+${JSON.stringify(schema, null, 2)}`
+
+export const JSON_ONLY_HINT = jsonOnlyHint(ACTION_JSON_SCHEMA)

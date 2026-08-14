@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { app, type BaseWindow } from 'electron'
-import type { FlowGraph, SessionSnapshot } from '@shared/types'
+import { MANUAL_LANE_ID, type FlowGraph, type SessionSnapshot } from '@shared/types'
 import { delay } from './engine/PageDriver'
 import { preview } from './engine/previewManager'
 import { sessions } from './engine/sessionManager'
@@ -10,14 +10,69 @@ import { projectDir, readJson } from './store/paths'
 import { join } from 'node:path'
 
 /**
+ * 图谱该长什么样。
+ *
+ * 这条自检以前只把图谱打印出来给人看，改坏了也不会有人发现。
+ * 收尾整理引入之后更需要断言：它会改泳道、删边、重排坐标，
+ * 任何一处出错都表现为「图看起来怪怪的」，肉眼很难第一时间归因。
+ */
+function checkGraph(graph: FlowGraph | null, state: string, takeover: boolean, aiReview: boolean): string[] {
+  const fail: string[] = []
+  if (state !== 'finished') fail.push(`会话未进入 finished：${state}`)
+  if (!graph) {
+    fail.push('没有产出图谱')
+    return fail
+  }
+
+  if (takeover) {
+    // 先确认这一轮真的录到了人工接管界面。录不到的话下面几条都会空过，
+    // 那是「什么都没验到」而不是「验过了没问题」
+    if (!graph.nodes.some((n) => n.kind === 'manual')) fail.push('没有录到人工接管界面，本轮没验到归类')
+
+    // 这两条与 AI 无关：确定性层的继承回落单独就该把节点挪出临时泳道
+    if (graph.lanes.some((l) => l.id === MANUAL_LANE_ID)) fail.push('收尾后仍存在人工接管泳道')
+    if (graph.nodes.some((n) => n.lane === MANUAL_LANE_ID)) fail.push('仍有节点留在人工接管泳道')
+
+    /*
+     * mock AI 刻意把 manual-1 归到 verify——继承值是 login，两者不同，
+     * 因此 verify 在不在就能区分「AI 归类真的生效」与「只是继承回落顶上了」。
+     * reviewfail 场景反过来：AI 返回垃圾，verify 不该出现，但上面两条仍须成立。
+     */
+    const hasVerify = graph.lanes.some((l) => l.id === 'verify')
+    if (aiReview && !hasVerify) fail.push('AI 归类未生效：没有出现 verify 泳道')
+    if (!aiReview && hasVerify) fail.push('AI 返回不可解析时不该采信它的归类结果')
+  }
+
+  const pairs = new Map<string, number>()
+  for (const e of graph.edges) pairs.set(`${e.from}->${e.to}`, (pairs.get(`${e.from}->${e.to}`) ?? 0) + 1)
+  const over = [...pairs].filter(([, n]) => n > 1)
+  if (over.length) fail.push(`同一对界面之间仍有多条连线：${over.map(([k, n]) => `${k}×${n}`).join('、')}`)
+
+  const cells = graph.nodes.filter((n) => n.col >= 0).map((n) => `${n.lane}#${n.col}#${n.sub}`)
+  if (new Set(cells).size !== cells.length) fail.push('重排后存在坐标重叠的卡片')
+
+  const ids = new Set(graph.nodes.map((n) => n.id))
+  const dangling = graph.edges.filter((e) => !ids.has(e.from) || !ids.has(e.to))
+  if (dangling.length) fail.push(`存在悬挂连线 ${dangling.length} 条`)
+
+  return fail
+}
+
+/**
  * 全流程自检：mock AI + 内置测试站，跑一整轮自动探索并打印图谱结果。
  *   UFC_SELFCHECK_EXPLORE=1 UFC_SITE=http://localhost:4183 UFC_AI=http://localhost:4190/v1
  */
 export async function runExploreCheck(win: BaseWindow, site: string, aiBase: string): Promise<void> {
   const out: Record<string, unknown> = {}
   let projectId = ''
-  // takeover 场景从登录页起步，会撞上验证码并转人工
-  const takeover = process.env.UFC_SCENARIO === 'takeover'
+  /*
+   * takeover 场景从登录页起步，会撞上验证码并转人工。
+   * reviewfail 也走这条路：只有产出了人工接管节点，收尾才会真的去问 AI，
+   * 那条场景要验的正是「AI 答不上来时回落继承值」。
+   */
+  const scenario = process.env.UFC_SCENARIO ?? 'normal'
+  const takeover = scenario === 'takeover' || scenario === 'reviewfail'
+  const aiReview = scenario !== 'reviewfail'
 
   try {
     preview.bindWindow(win)
@@ -51,20 +106,39 @@ export async function runExploreCheck(win: BaseWindow, site: string, aiBase: str
       return s
     }
 
-    let snap = await waitFor(['finished', 'failed', 'paused', 'awaiting_human'], 120_000)
+    // 步数会随页面时序浮动，收尾整理又要多两次 AI 往返，等宽一点，免得把「还在跑」误判成失败
+    let snap = await waitFor(['finished', 'failed', 'paused', 'awaiting_human'], 180_000)
 
     if (takeover && snap.state === 'awaiting_human') {
       out.needHuman = snap.reason
-      // 模拟真人：在验证码页按对图形（脚本无法从截图判断，必须真人操作）
-      const pt = (await preview.driver.evalInPage(
-        `(() => { const b = document.querySelectorAll('#shapes button')[2]
-           if (!b) return null
-           const r = b.getBoundingClientRect()
-           return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) } })()`
-      )) as { x: number; y: number } | null
-      if (pt) {
-        await preview.driver.tap(pt.x, pt.y)
-        await delay(2500)
+      /*
+       * 先停一下再动手。
+       *
+       * 录制器靠「连续两次探针签名一致」才认一屏（两轮各 700ms），立刻点掉验证码的话
+       * 页面会在双确认完成前跳走，这一轮就一个人工接管界面都录不到——
+       * 后面关于归类的断言全部空过。停两秒，验证码页必定入库。
+       */
+      await delay(2000)
+
+      /*
+       * 模拟真人：在验证码页按对图形（脚本无法从截图判断，必须真人操作）。
+       *
+       * 要重试：转入等待人工的那一刻页面未必已经渲染出按钮，点空一次就会一直卡在
+       * 等待人工上——这条自检现在要决定退出码，不能靠运气。
+       */
+      for (let i = 0; i < 10 && !preview.driver.currentUrl().includes('success'); i++) {
+        const pt = (await preview.driver.evalInPage(
+          `(() => { const b = document.querySelectorAll('#shapes button')[2]
+             if (!b) return null
+             const r = b.getBoundingClientRect()
+             return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) } })()`
+        ).catch(() => null)) as { x: number; y: number } | null
+        if (pt) {
+          await preview.driver.tap(pt.x, pt.y)
+          await delay(1200)
+        } else {
+          await delay(600)
+        }
       }
       out.afterHumanUrl = preview.driver.currentUrl()
 
@@ -82,6 +156,8 @@ export async function runExploreCheck(win: BaseWindow, site: string, aiBase: str
           edges: graph.edges.map((e) => ({ from: e.from, to: e.to, label: e.label, type: e.type })),
         }
       : null
+
+    out.assertions = { failed: checkGraph(graph, snap.state, takeover, aiReview) }
 
     // 结束时页面上的表单状态，便于定位「为什么提交没通过」
     out.finalPage = await preview.driver
