@@ -94,3 +94,35 @@ test('创建项目时 AI 配置为空，下拉里给出新建入口', async () =
     await app.close()
   }
 })
+
+/**
+ * AI 配置下拉必须能看到全部配置。
+ *
+ * 回归背景：配置列表原先只在项目页挂载时拉一次。设置从侧边栏独立页面改成浮在
+ * 项目页上的弹窗之后，这个视图不再卸载重挂，后加的配置就永远进不了下拉——
+ * 界面上表现为「明明配了好几个，创建项目时只能选第一个」。
+ */
+test('创建项目时能看到后来新增的 AI 配置', async () => {
+  const { app, window } = await launchApp()
+  try {
+    const mk = (name: string) =>
+      ipc<{ id: string }>(window, 'ai:profiles:save', {
+        profile: { id: '', name, protocol: 'openai', baseUrl: 'http://localhost:1/v1', model: `${name}-model` },
+        apiKey: 'k',
+      })
+
+    // 项目页已经挂载之后再加配置，正是回归发生的时序
+    await mk('甲')
+    await mk('乙')
+
+    await window.getByRole('button', { name: /创建项目/ }).first().click()
+    const createModal = window.locator('.modal').first()
+    await createModal.locator('label.field', { hasText: 'AI 配置' }).locator('.ufc-select').click()
+    const popup = window.locator('.ufc-select-pop')
+    await expect(popup.locator('button')).toHaveCount(2)
+    await expect(popup).toContainText('甲')
+    await expect(popup).toContainText('乙')
+  } finally {
+    await app.close()
+  }
+})

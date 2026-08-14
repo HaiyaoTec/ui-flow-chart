@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { FlowGraph, GraphPatch, ProjectMeta, SessionEvent, SessionSnapshot } from '@shared/types'
+import { mergePatch } from '@shared/mergePatch'
 
 export interface LogLine {
   ts: number
@@ -45,26 +46,8 @@ export const useApp = create<AppState>((set) => ({
       if (!s.graph) return s
       // 后台项目也在产出补丁，落到当前打开的项目上就是静默污染图谱
       if (patch.projectId && patch.projectId !== s.project?.id) return s
-      const graph: FlowGraph = {
-        ...s.graph,
-        lanes: [...s.graph.lanes],
-        nodes: [...s.graph.nodes],
-        edges: [...s.graph.edges],
-        meta: patch.meta ?? s.graph.meta,
-      }
-      for (const l of patch.addedLanes ?? []) if (!graph.lanes.some((x) => x.id === l.id)) graph.lanes.push(l)
-      // 节点可能因为自动布局而带回新坐标，按 id 覆盖式合并
-      for (const n of [...(patch.addedNodes ?? []), ...(patch.updatedNodes ?? [])]) {
-        const i = graph.nodes.findIndex((x) => x.id === n.id)
-        if (i >= 0) graph.nodes[i] = n
-        else graph.nodes.push(n)
-      }
-      for (const e of patch.addedEdges ?? []) if (!graph.edges.some((x) => x.id === e.id)) graph.edges.push(e)
-      if (patch.removedNodeIds?.length) {
-        const gone = new Set(patch.removedNodeIds)
-        graph.nodes = graph.nodes.filter((n) => !gone.has(n.id))
-        graph.edges = graph.edges.filter((e) => !gone.has(e.from) && !gone.has(e.to))
-      }
+      const graph = mergePatch(s.graph, patch)
+      // 只有真正新增的节点才触发「跟随新界面」，收尾整理下发的全量 updatedNodes 不该让画布跳走
       const added = (patch.addedNodes ?? []).map((n) => n.id)
       return { graph, newNodeIds: added.length ? added : s.newNodeIds }
     }),

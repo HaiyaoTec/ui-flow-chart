@@ -110,4 +110,25 @@ describe('版面与走线', () => {
     }
     expect(drawn.find((e) => e.id === 'c->a')!.dir).toBe('back')
   })
+
+  /*
+   * 收尾整理会把人工接管节点改到别的泳道。
+   * assignLayout 的占位表按 lane#col 记，且只处理未落位的节点——
+   * 改完 lane 不重排的话，两张卡片会精确落在同一格上互相重叠。
+   */
+  it('改写泳道后重排，坐标不重叠', () => {
+    const g = graph(
+      [node('a', 'entry'), node('b', 'entry'), node('m1', 'manual'), node('m2', 'manual')],
+      [edge('a', 'b'), edge('b', 'm1'), edge('m1', 'm2')]
+    )
+    assignLayout(g)
+
+    // 模拟归位：两个接管节点并入 entry
+    for (const n of g.nodes) if (n.lane === 'manual') n.lane = 'entry'
+    relayoutAll(g)
+
+    const cells = g.nodes.map((n) => `${n.lane}#${n.col}#${n.sub}`)
+    expect(new Set(cells).size).toBe(cells.length)
+    expect(g.nodes.every((n) => n.col >= 0 && n.sub >= 0)).toBe(true)
+  })
 })

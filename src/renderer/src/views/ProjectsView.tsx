@@ -95,9 +95,22 @@ export default function ProjectsView({ onOpened }: Props) {
     }
   }
 
+  /*
+   * AI 配置列表要能刷新。
+   *
+   * 早先设置是侧边栏里的独立页面，来回切一次这个视图就重新挂载、顺带把列表拉新；
+   * 改成浮在项目页上的弹窗之后，本视图从头到尾不卸载，新加的配置永远进不了下拉。
+   * 所以打开创建对话框、关闭设置面板这两处都要主动拉一次。
+   */
+  const loadProfiles = async (): Promise<AiProfileMasked[]> => {
+    const list = await invoke(CH.aiProfilesList)
+    setProfiles(list)
+    return list
+  }
+
   useEffect(() => {
     void reload()
-    void invoke(CH.aiProfilesList).then(setProfiles)
+    void loadProfiles()
     void invoke(CH.settingsGet).then((s) => setDefaultGoal(s.defaultGoal))
   }, [])
 
@@ -110,12 +123,14 @@ export default function ProjectsView({ onOpened }: Props) {
     return () => clearInterval(t)
   }, [session?.state])
 
-  function startCreate() {
+  async function startCreate() {
+    // 先把配置列表拉新再开对话框：期间用户可能在设置里加过配置
+    const list = await loadProfiles().catch(() => profiles)
     setForm({
       name: '',
       targetUrl: '',
       deviceId: DEFAULT_DEVICE_ID,
-      aiProfileId: profiles[0]?.id ?? '',
+      aiProfileId: list[0]?.id ?? '',
       goal: defaultGoal,
     })
     setError('')
@@ -173,7 +188,7 @@ export default function ProjectsView({ onOpened }: Props) {
           <h2>项目</h2>
           <div className="sub">每个项目对应一个待分析的网站，拥有独立的会话分区与图谱工程目录。</div>
         </div>
-        <button className="primary" onClick={startCreate}>
+        <button className="primary" onClick={() => void startCreate()}>
           <Icon name="add" />
           创建项目
         </button>
@@ -354,8 +369,7 @@ export default function ProjectsView({ onOpened }: Props) {
         section="ai"
         onClose={() => {
           setAiOpen(false)
-          void invoke(CH.aiProfilesList).then((list) => {
-            setProfiles(list)
+          void loadProfiles().then((list) => {
             setForm((f) => (f.aiProfileId || list.length === 0 ? f : { ...f, aiProfileId: list[0].id }))
           })
         }}

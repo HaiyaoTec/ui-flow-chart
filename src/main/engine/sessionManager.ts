@@ -3,9 +3,6 @@ import { getDevice } from '@shared/devices'
 import { CH } from '@shared/ipc-contract'
 import {
   SESSION_HOLDS_PREVIEW,
-  type FlowEdge,
-  type FlowLane,
-  type FlowNode,
   type SessionBudgets,
   type SessionSnapshot,
 } from '@shared/types'
@@ -106,8 +103,7 @@ class SessionManager {
         }
       },
       // 带上项目 id：渲染进程可能正开着另一个项目，补丁不能画错地方
-      emitPatch: (lanes: FlowLane[], nodes: FlowNode[], edges: FlowEdge[]) =>
-        this.send(CH.evGraphPatch, { projectId: meta.id, addedLanes: lanes, addedNodes: nodes, addedEdges: edges }),
+      emitPatch: (patch) => this.send(CH.evGraphPatch, { projectId: meta.id, ...patch }),
     })
     return this.session
   }

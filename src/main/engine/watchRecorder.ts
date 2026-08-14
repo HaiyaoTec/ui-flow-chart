@@ -1,4 +1,4 @@
-import type { FlowEdge, FlowLane, FlowNode, ProbeResult } from '@shared/types'
+import type { FlowEdge, FlowLane, FlowNode, GraphPatch, ProbeResult } from '@shared/types'
 import type { GraphStore } from './graphStore'
 import { delay, type PageDriver } from './PageDriver'
 import { signatureHash } from './signature'
@@ -71,7 +71,7 @@ export class WatchRecorder {
     private readonly opts: {
       lane: string
       laneTitle: string
-      onPatch: (lanes: FlowLane[], nodes: FlowNode[], edges: FlowEdge[]) => void
+      onPatch: (patch: Omit<GraphPatch, 'projectId'>) => void
       maxScreens: number
     }
   ) {}
@@ -145,7 +145,7 @@ export class WatchRecorder {
         count += 1
 
         this.store.layoutAndSave()
-        this.opts.onPatch(lanes.splice(0), nodes.slice(-1), edges.slice(-1))
+        this.opts.onPatch({ addedLanes: lanes.splice(0), addedNodes: nodes.slice(-1), addedEdges: edges.slice(-1) })
       }
 
       this.pendingSig = sig

@@ -140,6 +140,29 @@ export class GraphStore {
     return e
   }
 
+  /** 按 id 批量删边，返回真正删掉的那些。收尾整理合并重复连线时用 */
+  removeEdges(ids: string[]): string[] {
+    if (!ids.length) return []
+    const gone = new Set(ids)
+    const hit = this.graph.edges.filter((e) => gone.has(e.id)).map((e) => e.id)
+    if (hit.length) this.graph.edges = this.graph.edges.filter((e) => !gone.has(e.id))
+    return hit
+  }
+
+  /**
+   * 回收没有任何节点的泳道，返回被回收的 id。
+   *
+   * 空泳道会画成一整行卡片高的虚线框，还占着泳道开关。
+   * 图上一个节点都没有时什么都不做——那是空项目，不是「泳道空了」。
+   */
+  pruneEmptyLanes(): string[] {
+    if (!this.graph.nodes.length) return []
+    const used = new Set(this.graph.nodes.map((n) => n.lane))
+    const gone = this.graph.lanes.filter((l) => !used.has(l.id)).map((l) => l.id)
+    if (gone.length) this.graph.lanes = this.graph.lanes.filter((l) => used.has(l.id))
+    return gone
+  }
+
   deleteNode(id: string): void {
     this.graph.nodes = this.graph.nodes.filter((n) => n.id !== id)
     this.graph.edges = this.graph.edges.filter((e) => e.from !== id && e.to !== id)

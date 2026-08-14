@@ -1,9 +1,12 @@
 ﻿import {
   DEFAULT_BUDGETS,
+  MANUAL_LANE_ID,
+  MANUAL_LANE_TITLE,
   type AiAction,
   type FlowEdge,
   type FlowLane,
   type FlowNode,
+  type GraphPatch,
   type ProbeResult,
   type ProjectMeta,
   type SessionBudgets,
@@ -13,6 +16,7 @@
 } from '@shared/types'
 import type { IAiClient } from '../ai/types'
 import { ActionParseError } from '../ai/parseAction'
+import { describeFinalize, finalizeGraph } from './finalize'
 import { GraphStore } from './graphStore'
 import { delay, type PageDriver } from './PageDriver'
 import { signatureHash } from './signature'
@@ -24,7 +28,8 @@ export interface SessionDeps {
   /** 打开目标站并铺好设备模拟 */
   openTarget: (url: string) => Promise<void>
   emit: (event: SessionEvent, snapshot: SessionSnapshot) => void
-  emitPatch: (lanes: FlowLane[], nodes: FlowNode[], edges: FlowEdge[]) => void
+  /** 增量补丁。收一个 patch 对象而不是三个数组：收尾整理还要送更新与删除 */
+  emitPatch: (patch: Omit<GraphPatch, 'projectId'>) => void
 }
 
 const MAX_PARSE_RETRY = 2
@@ -78,6 +83,8 @@ export class ExplorerSession {
   private pauseRequested = false
   private takeoverRequested = false
   private takeoverEndRequested = false
+  /** 本轮是否已经收尾整理过。loop 的正常出口与 catch 分支都会调，只许跑一次 */
+  private finalizeDone = false
   private watcher: WatchRecorder | null = null
 
   /** 签名 → 访问次数，用于循环检测 */
@@ -127,6 +134,7 @@ export class ExplorerSession {
     this.stopRequested = false
     this.pauseRequested = false
     this.takeoverRequested = false
+    this.finalizeDone = false
     this.visits.clear()
     this.sigHistory = []
     this.screenFails.clear()
@@ -142,6 +150,8 @@ export class ExplorerSession {
   }
 
   pause(): SessionSnapshot {
+    // 收尾是终端流程，「待会儿接着跑」在这里没有意义
+    if (this.state === 'finishing') return this.snapshot()
     if (this.isRunning()) {
       this.pauseRequested = true
       // 掐断在途的 AI 请求，不必等它慢慢超时
@@ -236,7 +246,7 @@ export class ExplorerSession {
             const edge = store.addEdge(this.currentNodeId, known.id, this.pendingEdgeLabel || '自动跳转', 'link', 'ai')
             if (edge) {
               store.layoutAndSave()
-              this.deps.emitPatch([], [], [edge])
+              this.deps.emitPatch({ addedEdges: [edge] })
             }
           }
           this.currentNodeId = known.id
@@ -299,7 +309,7 @@ export class ExplorerSession {
 
         if (action.action === 'done') {
           this.log('info', `AI 判定探索完成：${action.reason}`)
-          return this.toFinished()
+          return await this.finalizeAndFinish()
         }
         if (action.action === 'need_human') {
           this.takeoverRequested = true
@@ -333,7 +343,7 @@ export class ExplorerSession {
           // 反复提示仍无进展说明已经探完了，主动收敛，别耗到步数上限
           if (this.staleRounds >= 2) {
             this.log('info', '连续多轮没有发现新界面，判定探索已收敛')
-            return this.toFinished()
+            return await this.finalizeAndFinish()
           }
         }
 
@@ -359,10 +369,12 @@ export class ExplorerSession {
         this.emit({ kind: 'budget', snapshot: this.snapshot() })
       }
 
-      this.toFinished()
+      await this.finalizeAndFinish()
     } catch (e) {
       this.lastError = e instanceof Error ? e.message : String(e)
       this.log('error', `探索中断：${this.lastError}`)
+      // 崩溃也把图收拾一遍，但不覆盖 failed 状态：用户得知道这轮是断掉的
+      this.runFinalize()
       this.setState('failed', this.lastError)
     }
   }
@@ -422,7 +434,7 @@ export class ExplorerSession {
 
     if (lanes.length || nodes.length || edges.length) {
       store.layoutAndSave()
-      this.deps.emitPatch(lanes, nodes, edges)
+      this.deps.emitPatch({ addedLanes: lanes, addedNodes: nodes, addedEdges: edges })
     }
     return { isNew, nodeId }
   }
@@ -550,10 +562,10 @@ export class ExplorerSession {
     await this.deps.driver.clearUserInput()
 
     this.watcher = new WatchRecorder(this.deps.driver, store, {
-      lane: 'manual',
-      laneTitle: '人工接管',
+      lane: MANUAL_LANE_ID,
+      laneTitle: MANUAL_LANE_TITLE,
       maxScreens: Math.max(1, this.budgets.maxScreens - this.screens),
-      onPatch: (lanes, nodes, edges) => this.deps.emitPatch(lanes, nodes, edges),
+      onPatch: (patch) => this.deps.emitPatch(patch),
     })
 
     const stopWatch = () => this.takeoverEndRequested || this.stopRequested
@@ -615,6 +627,37 @@ export class ExplorerSession {
     this.pauseRequested = false
     this.setState('paused', reason)
     this.log('info', `已暂停：${reason}`)
+  }
+
+  /**
+   * 收尾整理 + 收束会话。
+   *
+   * 对外契约：**绝不 reject**。它是从 loop 的 try 里 await 的，一旦抛出就会掉进
+   * catch 被判成 failed——一次成功的探索会显示成「已中断」。
+   */
+  private async finalizeAndFinish(): Promise<void> {
+    this.setState('finishing')
+    this.runFinalize()
+    this.toFinished()
+  }
+
+  /**
+   * 确定性收尾。整个包在 try 里：图整理失败也不该让一轮成功的探索显示成中断。
+   * 只跑一次——loop 的正常出口与 catch 分支都会调它。
+   */
+  private runFinalize(): void {
+    if (this.finalizeDone || !this.store) return
+    this.finalizeDone = true
+    try {
+      const r = finalizeGraph(this.store)
+      this.log('info', describeFinalize(r))
+      if (r.merged || r.dropped) {
+        this.store.appendSession({ kind: 'cleanup', merged: r.merged, dropped: r.dropped, moved: r.moved })
+      }
+      this.deps.emitPatch(r.patch)
+    } catch (e) {
+      this.log('warn', `图谱整理未完成：${e instanceof Error ? e.message : String(e)}`)
+    }
   }
 
   private toFinished(): void {

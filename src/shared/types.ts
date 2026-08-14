@@ -171,8 +171,18 @@ export interface GraphPatch {
   addedEdges?: FlowEdge[]
   updatedNodes?: FlowNode[]
   removedNodeIds?: string[]
+  /** 收尾整理：改写连线的标注与类型 */
+  updatedEdges?: FlowEdge[]
+  /** 收尾整理：合并重复连线后要去掉的那些 */
+  removedEdgeIds?: string[]
+  /** 收尾整理：回收空泳道。泳道原先只有创建没有删除 */
+  removedLaneIds?: string[]
   meta?: FlowGraph['meta']
 }
+
+/** 人工接管期的临时泳道。收尾整理会把这批节点归到真实的功能泳道 */
+export const MANUAL_LANE_ID = 'manual'
+export const MANUAL_LANE_TITLE = '人工接管'
 
 /** 连线标注固定词表，prompt 引导 AI 使用，避免口语化表述 */
 export const EDGE_LABEL_VERBS = [
