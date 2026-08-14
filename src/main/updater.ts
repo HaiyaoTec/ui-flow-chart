@@ -39,6 +39,8 @@ class Updater {
   private state: UpdateState = { phase: 'idle', version: '', notes: '', percent: 0, error: '' }
   private timer: NodeJS.Timeout | null = null
   private started = false
+  /** 更新模块加载失败：此时 api() 返回 null 的原因不是「开发模式」 */
+  private loadFailed = false
 
   current(): UpdateState {
     return {
@@ -67,10 +69,27 @@ class Updater {
    */
   private async api(): Promise<typeof import('electron-updater').autoUpdater | null> {
     if (!app.isPackaged) return null
-    const { autoUpdater } = await import('electron-updater')
-    autoUpdater.autoDownload = false // 先问过用户设置再下，避免占用带宽
-    autoUpdater.autoInstallOnAppQuit = true
-    return autoUpdater
+    try {
+      /*
+       * electron-updater 是 CJS，而主进程产物是 ESM。
+       *
+       * 开发模式下 Vite 会做互操作转换，`const { autoUpdater } = await import(...)`
+       * 拿得到值；打包后这句原样交给 Node 的 ESM 加载器，具名导出分析不出来，
+       * autoUpdater 是 undefined，于是 api() 抛 TypeError、IPC 直接 reject，
+       * 界面永远停在「当前版本 —」——打包后的更新链路一直是坏的，开发模式看不出来。
+       */
+      const mod = await import('electron-updater')
+      const autoUpdater = (mod.default ?? mod).autoUpdater
+      if (!autoUpdater) throw new Error('electron-updater 未能加载')
+      autoUpdater.autoDownload = false // 先问过用户设置再下，避免占用带宽
+      autoUpdater.autoInstallOnAppQuit = true
+      return autoUpdater
+    } catch (e) {
+      // 初始化失败也要说出来：静默失败等于用户永远收不到更新，还看不出原因
+      this.loadFailed = true
+      this.emit({ phase: 'error', error: `更新模块加载失败：${e instanceof Error ? e.message : String(e)}` })
+      return null
+    }
   }
 
   async start(): Promise<void> {
@@ -105,8 +124,8 @@ class Updater {
   async check(manual: boolean): Promise<UpdateState> {
     const up = await this.api()
     if (!up) {
-      // 开发模式没有 app-update.yml，明说比抛错好
-      if (manual) this.emit({ phase: 'error', error: '开发模式下不检查更新，请使用打包后的版本' })
+      // 开发模式没有 app-update.yml，明说比抛错好；加载失败的原因 api() 已经报过了
+      if (manual && !this.loadFailed) this.emit({ phase: 'error', error: '开发模式下不检查更新，请使用打包后的版本' })
       return this.current()
     }
     if (this.state.phase === 'downloading') return this.current()

@@ -150,6 +150,17 @@ button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
+/* 焦点圈只留给键盘操作，且用应用自己的强调色：
+   系统默认焦点圈跟随 Windows 强调色，浅色界面上常是一圈橙色，很跳。
+   data-kb 由渲染入口在第一次按 Tab 时打上（见 main.tsx），
+   在那之前一律不画——冷启动自动聚焦的那枚圈就是这么冒出来的。 */
+:focus {
+  outline: none;
+}
+:root[data-kb] :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 button.primary {
   background: var(--accent);
   border-color: var(--accent);

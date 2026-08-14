@@ -44,13 +44,19 @@
   flex: 1;
   min-width: 0;
 }
-.settings-rail button:hover:not(:disabled) {
+/* 悬停要排除选中项：:hover 那条的权重比 .on 高，不排除的话
+   鼠标一划过当前板块，它的强调底就被灰色盖掉，看着像选中丢了 */
+.settings-rail button:hover:not(:disabled):not(.on) {
   background: color-mix(in srgb, var(--fg) 7%, var(--panel-2));
 }
 /* 选中态与侧边栏导航同一套：低饱和强调底，不换边框 */
 .settings-rail button.on {
   background: var(--accent-soft);
   color: var(--fg);
+}
+/* 选中项的悬停只在自身底色上加深一档 */
+.settings-rail button.on:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--fg) 6%, var(--accent-soft));
 }
 .settings-rail button.on .icon {
   color: var(--accent);
