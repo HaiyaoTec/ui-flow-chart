@@ -179,7 +179,7 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
             结束接管
           </button>
         )}
-        {(running || state === 'paused' || waitingHuman) && (
+        {(running || state === 'paused' || waitingHuman || state === 'finishing') && (
           <button className="danger" onClick={() => void invoke(CH.sessionStop).then(setSession)}>
             <Icon name="stop" />
             结束

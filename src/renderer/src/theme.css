@@ -513,7 +513,8 @@ label.field > .hint {
 .state-chip.thinking,
 .state-chip.acting,
 .state-chip.launching,
-.state-chip.resuming {
+.state-chip.resuming,
+.state-chip.finishing {
   color: var(--accent);
   border-color: var(--accent);
 }
