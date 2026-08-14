@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { DEVICE_PRESETS, getDevice } from '@shared/devices'
+import { canRotate, DEFAULT_DEVICE_ID, getDevice, orientDevice } from '@shared/devices'
 import { CH, type NavState, type PreviewDiagnosis } from '@shared/ipc-contract'
 import { invoke, on } from '../../ipc'
 import DevicePicker from '../DevicePicker'
@@ -34,7 +34,7 @@ export default function PreviewPane({
   suppressed = false,
   onDeviceChange,
 }: Props) {
-  const [deviceId, setDeviceId] = useState(boundDeviceId ?? DEVICE_PRESETS[0].id)
+  const [deviceId, setDeviceId] = useState(boundDeviceId ?? DEFAULT_DEVICE_ID)
   const [url, setUrl] = useState(initialUrl)
   const [editingUrl, setEditingUrl] = useState(false)
   const [nav, setNav] = useState<NavState | null>(null)
@@ -56,12 +56,16 @@ export default function PreviewPane({
   const [switching, setSwitching] = useState(false)
   /** 视图藏起时顶上的静帧 */
   const [frozen, setFrozen] = useState('')
-  const device = getDevice(deviceId)
+  /** 横屏：只改逻辑视口的宽高，UA 与像素比不变 */
+  const [landscape, setLandscape] = useState(false)
+  const device = orientDevice(getDevice(deviceId), landscape)
   const lastRect = useRef('')
   const alive = useRef(true)
   // onScreenRect 是稳定回调，取当前设备只能走 ref
   const deviceIdRef = useRef(deviceId)
   deviceIdRef.current = deviceId
+  const landscapeRef = useRef(landscape)
+  landscapeRef.current = landscape
 
   useEffect(
     () =>
@@ -143,7 +147,7 @@ export default function PreviewPane({
   const onScreenRect = useCallback(
     (rect: { x: number; y: number; width: number; height: number; scale: number }) => {
       // 显示比例取自 scale 而不是裁切后的宽度，否则放大到超出面板时会算小
-      setShownWidth(rect.scale * getDevice(deviceIdRef.current).width)
+      setShownWidth(rect.scale * orientDevice(getDevice(deviceIdRef.current), landscapeRef.current).width)
       const key = `${rect.x},${rect.y},${rect.width},${rect.height},${rect.scale.toFixed(4)}`
       if (key === lastRect.current) return
       lastRect.current = key
@@ -205,14 +209,17 @@ export default function PreviewPane({
    * 换设备要重放全部 override 并重新加载，中间页面必然是空的。
    * 与其让用户盯着一片纯黑，不如先把视图藏起来、给句说明，加载完再显示。
    */
-  async function changeDevice(id: string) {
+  async function changeDevice(id: string, nextLandscape = landscape) {
     setDeviceId(id)
+    setLandscape(nextLandscape)
     onDeviceChange?.(id)
     setBusy(true)
     setSwitching(true)
     showView(false, true)
     try {
-      await invoke(CH.previewSetDevice, { deviceId: id })
+      // 横屏走 custom：主进程按 id 查表，带上同 id 的规格就能覆盖掉预设的宽高
+      const next = orientDevice(getDevice(id), nextLandscape)
+      await invoke(CH.previewSetDevice, { deviceId: id, custom: next })
     } finally {
       setBusy(false)
       setSwitching(false)
@@ -230,6 +237,18 @@ export default function PreviewPane({
         </button>
         {open && (
           <>
+            {/* 横竖屏切换：桌面档没有这个概念，直接不出现 */}
+            {canRotate(device) && (
+              <button
+                className={`orient-toggle${landscape ? ' on' : ''}`}
+                disabled={busy}
+                onClick={() => void changeDevice(deviceId, !landscape)}
+                title={landscape ? '切回竖屏' : '切到横屏'}
+                aria-pressed={landscape}
+              >
+                <Icon name="rotate" size={15} />
+              </button>
+            )}
             <Select
               className="zoom-select"
               value={String(zoom)}

@@ -229,6 +229,31 @@ export function categoryOf(d: DeviceSpec): DeviceCategory {
   return 'android'
 }
 
+/**
+ * 默认设备。
+ *
+ * 主进程与渲染进程必须用同一个：早先主进程写死 'iphone-14-pro-max'（430×932），
+ * 渲染进程取 DEVICE_PRESETS[0]（440×956），于是没手动选过设备时，
+ * 工具栏标的机型和实际生效的视口对不上。
+ */
+export const DEFAULT_DEVICE_ID = 'iphone-17-pro-max'
+
+/** 桌面档没有横竖屏之分，其余都能转 */
+export function canRotate(d: DeviceSpec): boolean {
+  return d.kind !== 'desktop'
+}
+
+/**
+ * 取设备在指定朝向下的规格。
+ *
+ * 横屏就是把逻辑视口的宽高对调——真机转屏时 UA、像素比、触摸都不变，
+ * 变的只有视口，所以这里只动 width/height。
+ */
+export function orientDevice(d: DeviceSpec, landscape: boolean): DeviceSpec {
+  if (!landscape || !canRotate(d)) return d
+  return { ...d, width: d.height, height: d.width }
+}
+
 export function getDevice(id: string, custom?: DeviceSpec): DeviceSpec {
   if (custom && custom.id === id) return custom
   const wanted = LEGACY_DEVICE_IDS[id] ?? id

@@ -1,6 +1,6 @@
 import type { BaseWindow } from 'electron'
 import { CH, type Bounds, type NavState, type PreviewDiagnosis } from '@shared/ipc-contract'
-import { getDevice } from '@shared/devices'
+import { DEFAULT_DEVICE_ID, getDevice } from '@shared/devices'
 import type { DeviceSpec } from '@shared/types'
 import { computeFitScale, PageDriver } from './PageDriver'
 import { getUiContents, getUiView } from '../window'
@@ -12,7 +12,7 @@ import { getUiContents, getUiView } from '../window'
 export class PreviewManager {
   readonly driver = new PageDriver()
   private win: BaseWindow | null = null
-  private device: DeviceSpec = getDevice('iphone-14-pro-max')
+  private device: DeviceSpec = getDevice(DEFAULT_DEVICE_ID)
   private pane: Bounds = { x: 0, y: 0, width: 430, height: 932 }
   /** 渲染进程指定的缩放；null 表示按可用空间自适应 */
   private paneScale: number | null = null

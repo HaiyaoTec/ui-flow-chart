@@ -120,14 +120,23 @@ export default function DeviceFrame({
      */
     const availW = box.clientWidth - 2
     const availH = Math.max(60, box.clientHeight - barH - 2)
-    // 以设备宽高比为准，取能塞进可用区域的最大尺寸。
-    // 装饰是按屏幕宽度等比的，所以要连同装饰一起解方程：
-    // 宽向 w·(1+chrome.x) ≤ 可用宽；纵向 h + chrome.y·w ≤ 可用高。
-    // 先算宽再减装饰的话，机身一定会撑出容器，然后被切掉边缘。
+    /*
+     * 以设备宽高比为准，取能塞进可用区域的最大尺寸。
+     * 装饰要连同一起解方程，先算屏幕再减装饰的话机身一定撑出容器、被切掉边缘。
+     *
+     * 装饰（边框、状态栏、home 条）在真机上是按短边等比的，横屏时短边是高，
+     * 所以两个比例都要换算到「相对于 h」还是「相对于 w」再代入：
+     * 竖屏 额外高 = chrome.y·w = chrome.y·ratio·h，额外宽 = chrome.x·w；
+     * 横屏 额外高 = chrome.y·h，额外宽 = chrome.x·h = (chrome.x/ratio)·w。
+     * 不做这层换算的话，横屏会按长边算装饰，边框和状态栏会撑得非常夸张。
+     */
     const ratio = device.width / device.height
-    let h = availH / (1 + chrome.y * ratio)
+    const landscape = device.width > device.height
+    const cy = landscape ? chrome.y : chrome.y * ratio
+    const cx = landscape ? chrome.x / ratio : chrome.x
+    let h = availH / (1 + cy)
     let w = h * ratio
-    const maxW = availW / (1 + chrome.x)
+    const maxW = availW / (1 + cx)
     if (w > maxW) {
       w = maxW
       h = w / ratio
@@ -141,9 +150,11 @@ export default function DeviceFrame({
     // 只能往小取：向上取整会把机身撑出容器
     setSize({ width: Math.floor(w), height: Math.floor(h) })
     const layout = LAYOUT_RATIO[device.kind]
+    // 同样按短边换算，横屏下才不会把放得下的机身判成溢出
+    const short = Math.min(w, h)
     setOverflow({
-      x: w * (1 + layout.x) > box.clientWidth + 1,
-      y: h + layout.y * w + barH > box.clientHeight + 1,
+      x: w + layout.x * short > box.clientWidth + 1,
+      y: h + layout.y * short + barH > box.clientHeight + 1,
     })
   }, [device.kind, device.width, device.height, zoom])
 
@@ -215,7 +226,9 @@ export default function DeviceFrame({
   // 外框的圆角、边框、装饰都按屏幕实际显示宽度等比缩放。
   // 写死 46px 圆角的话，预览一缩小手机就被「啃」成了圆角矩形。
   // 比例参考真机：iPhone 屏幕圆角约为宽度的 13%，机身边框约 3%。
-  const metrics = frameMetrics(device.kind, size.width)
+  // 按短边算：横屏时长边是宽，拿宽去算圆角与刘海会大得离谱
+  const shortSide = Math.min(size.width, size.height) || size.width
+  const metrics = frameMetrics(device.kind, shortSide)
 
   return (
     <div
@@ -250,7 +263,7 @@ export default function DeviceFrame({
         {isPhone && size.width > 0 && (
           <StatusBar
             width={size.width}
-            height={Math.round(size.width * STATUS_RATIO)}
+            height={Math.round(shortSide * STATUS_RATIO)}
             radius={metrics.screenRadius}
             islandW={metrics.notchW}
             islandH={metrics.notchH}

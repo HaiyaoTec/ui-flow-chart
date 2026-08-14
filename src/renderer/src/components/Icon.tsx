@@ -24,6 +24,7 @@ import {
   Play,
   Plus,
   RotateCw,
+  RotateCwSquare,
   Settings,
   Smartphone,
   Sparkles,
@@ -72,6 +73,8 @@ const ICONS = {
   themeSystem: Monitor,
   /** 单选项的选中标记 */
   check: Check,
+  /** 横竖屏切换 */
+  rotate: RotateCwSquare,
   caretDown: ChevronDown,
   caretRight: ChevronRight,
   caretUp: ChevronUp,

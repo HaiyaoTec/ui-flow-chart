@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { DEVICE_PRESETS, getDevice } from '@shared/devices'
+import { DEFAULT_DEVICE_ID, getDevice } from '@shared/devices'
 import { CH } from '@shared/ipc-contract'
 import type {
   AiProfileMasked,
@@ -73,7 +73,7 @@ export default function ProjectsView({ onOpened }: Props) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [listError, setListError] = useState('')
-  const [form, setForm] = useState({ name: '', targetUrl: '', deviceId: DEVICE_PRESETS[0].id, aiProfileId: '', goal: '' })
+  const [form, setForm] = useState({ name: '', targetUrl: '', deviceId: DEFAULT_DEVICE_ID, aiProfileId: '', goal: '' })
 
   const openProject = useApp((s) => s.openProject)
   const session = useApp((s) => s.session)
@@ -114,7 +114,7 @@ export default function ProjectsView({ onOpened }: Props) {
     setForm({
       name: '',
       targetUrl: '',
-      deviceId: DEVICE_PRESETS[0].id,
+      deviceId: DEFAULT_DEVICE_ID,
       aiProfileId: profiles[0]?.id ?? '',
       goal: defaultGoal,
     })

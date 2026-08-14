@@ -38,6 +38,25 @@
 .pv-head-title {
   color: var(--fg);
 }
+/* 横竖屏切换：与缩放选择器同一档轻量控件 */
+.pv-head .orient-toggle {
+  flex: none;
+  align-self: center;
+  padding: 4px 6px;
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+}
+.pv-head .orient-toggle:hover:not(:disabled) {
+  background: var(--panel-2);
+  color: var(--fg);
+}
+/* 横屏是一个持续生效的状态，用强调底标出来，不然切过去就没有回执了 */
+.pv-head .orient-toggle.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
 /* 缩放选择器压成标题条里的轻量控件，不抢标题的视觉层级 */
 .pv-head .zoom-select {
   flex: none;

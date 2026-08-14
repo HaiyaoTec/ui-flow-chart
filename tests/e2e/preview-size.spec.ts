@@ -1,5 +1,9 @@
 import { expect, test } from '@playwright/test'
+import { DEFAULT_DEVICE_ID, getDevice } from '../../src/shared/devices'
 import { ipc, launchApp, startTestSite, TEST_SITE } from './helpers'
+
+/** 预览页没选设备时用的就是这台，尺寸从预设表取，改默认机型不用回来改测试 */
+const DEV = getDevice(DEFAULT_DEVICE_ID)
 
 /**
  * 人工接管的前提是预览得足够大能真的点。
@@ -24,13 +28,13 @@ test('预览区应占满可用空间，设备按真实宽高比呈现', async ()
     expect(rect, '应能找到设备屏幕占位').toBeTruthy()
     // 竖屏手机：高度要吃掉大部分可用高度，而不是塌成一个几十像素的小块
     expect(rect!.h).toBeGreaterThan(rect!.viewportH * 0.6)
-    // 宽高比贴近 430:932
+    // 宽高比贴近设备真实比例
     const ratio = rect!.w / rect!.h
-    expect(Math.abs(ratio - 430 / 932)).toBeLessThan(0.05)
+    expect(Math.abs(ratio - DEV.width / DEV.height)).toBeLessThan(0.05)
 
-    // 页面确实按 430 宽的移动端布局渲染
+    // 页面确实按设备宽度的移动端布局渲染
     const width = await ipc<{ scrollWidth: number }>(window, 'test:probe').then((p) => p.scrollWidth)
-    expect(width).toBeLessThanOrEqual(430)
+    expect(width).toBeLessThanOrEqual(DEV.width)
   } finally {
     await app.close()
     stopSite()
