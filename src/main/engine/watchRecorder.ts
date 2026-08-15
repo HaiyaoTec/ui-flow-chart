@@ -72,6 +72,8 @@ export class WatchRecorder {
       lane: string
       laneTitle: string
       onPatch: (patch: Omit<GraphPatch, 'projectId'>) => void
+      /** 抓存档图。与探索期同源，抓图时会用静帧顶住屏幕区 */
+      capture: () => Promise<{ png: Buffer; jpegBase64: string }>
       maxScreens: number
     }
   ) {}
@@ -130,7 +132,7 @@ export class WatchRecorder {
             createdBy: 'human',
             probe,
           })
-          const shot = await this.driver.screenshot()
+          const shot = await this.opts.capture()
           this.store.saveShot(node.id, shot.png, shot.jpegBase64)
           nodes.push(node)
           nodeId = node.id

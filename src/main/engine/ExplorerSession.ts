@@ -21,7 +21,7 @@ import { buildEdgeReviewTask, buildLaneClassifyTask } from '../ai/reviewPrompt'
 import { describeFinalize, finalizeGraph, type AiVerdict } from './finalize'
 import { inheritLanes, planCleanup } from './graphCleanup'
 import { GraphStore } from './graphStore'
-import { delay, type PageDriver } from './PageDriver'
+import { delay, type PageDriver, type Screenshot } from './PageDriver'
 import { signatureHash } from './signature'
 import { WatchRecorder } from './watchRecorder'
 
@@ -30,6 +30,8 @@ export interface SessionDeps {
   ai: IAiClient
   /** 打开目标站并铺好设备模拟 */
   openTarget: (url: string) => Promise<void>
+  /** 抓存档图。走预览管理器而不是 driver：抓图期间要用静帧顶住屏幕区 */
+  captureArchival: () => Promise<Screenshot>
   emit: (event: SessionEvent, snapshot: SessionSnapshot) => void
   /** 增量补丁。收一个 patch 对象而不是三个数组：收尾整理还要送更新与删除 */
   emitPatch: (patch: Omit<GraphPatch, 'projectId'>) => void
@@ -281,7 +283,7 @@ export class ExplorerSession {
         // 大不了这一屏在画布上缺张缩略图
         let shot: { png: Buffer; jpegBase64: string } | null = null
         try {
-          shot = await this.deps.driver.screenshot()
+          shot = await this.deps.captureArchival()
         } catch (e) {
           this.log('warn', `截图失败，本步改用纯结构决策：${e instanceof Error ? e.message : String(e)}`)
         }
@@ -569,6 +571,7 @@ export class ExplorerSession {
       laneTitle: MANUAL_LANE_TITLE,
       maxScreens: Math.max(1, this.budgets.maxScreens - this.screens),
       onPatch: (patch) => this.deps.emitPatch(patch),
+      capture: () => this.deps.captureArchival(),
     })
 
     const stopWatch = () => this.takeoverEndRequested || this.stopRequested

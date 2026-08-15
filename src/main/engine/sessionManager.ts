@@ -92,6 +92,7 @@ class SessionManager {
       openTarget: async (url) => {
         await preview.open(url, getDevice(meta.deviceId, meta.customDevice), partitionOf(meta.id))
       },
+      captureArchival: () => preview.captureArchival(),
       emit: (event, snapshot) => {
         this.send(CH.evSession, { ...event, snapshot })
         if (event.kind === 'need-human') this.alertHuman(meta.name, event.reason)

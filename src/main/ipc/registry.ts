@@ -133,6 +133,7 @@ export function registerIpc(getWindow: () => BaseWindow | null): void {
   handle(CH.previewNavigate, (input) => preview.navigate(input))
   handle(CH.previewProbe, () => preview.driver.probe())
   handle(CH.previewDiagnose, () => preview.diagnose())
+  handle(CH.previewFreezeReady, ({ token }) => preview.noteFreezePainted(token))
 
   /**
    * 界面与预览的层级切换。
@@ -212,6 +213,11 @@ function registerTestHooks(getWindow: () => BaseWindow | null): void {
   ipcMain.handle('test:wait-stable', async () => preview.driver.waitStable())
   ipcMain.handle('test:graph', async (_e, projectId: string) => loadGraph(projectId))
   ipcMain.handle('test:preview-debug', async () => preview.debugInfo())
+  /** 走一次带静帧的存档抓图，验证「贴静帧 → 收回执 → 抬界面 → 抓图 → 复位」这条链 */
+  ipcMain.handle('test:capture-archival', async () => {
+    const shot = await preview.captureArchival()
+    return { pngBytes: shot.png.length, freeze: preview.lastFreezeInfo() }
+  })
   /** 界面视图有没有铺满内容区——铺不满就会在边缘露出底色，看着像黑边 */
   ipcMain.handle('test:ui-view-bounds', async () => {
     const w = getWindow()

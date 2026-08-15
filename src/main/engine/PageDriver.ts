@@ -448,6 +448,20 @@ export class PageDriver implements IPageDriver {
 
   /* -------------------------------- 截图 -------------------------------- */
 
+  /**
+   * 取一张当前画面，只用于顶替。
+   *
+   * 走 Electron 自带的 capturePage：它拿的是合成器已有的那一帧，按显示尺寸出图，
+   * 不会像带 clip.scale 的 CDP 抓图那样触发整块合成面重新光栅化。
+   * 存档图仍由 screenshot() 按设备原始分辨率出。
+   */
+  async capturePreviewFrame(): Promise<string> {
+    if (!this.rawView) return ''
+    const img = await this.rawView.webContents.capturePage()
+    if (img.isEmpty()) return ''
+    return img.toJPEG(70).toString('base64')
+  }
+
   async screenshot(): Promise<Screenshot> {
     if (!this.rawView || !this.device) throw new Error('预览视图尚未创建')
 

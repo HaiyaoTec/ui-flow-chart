@@ -1,7 +1,14 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { CH, type EventChannel, type IpcEventMap, type IpcInvokeMap, type InvokeChannel } from '@shared/ipc-contract'
 
-const EVENT_CHANNELS: EventChannel[] = [CH.evSession, CH.evGraphPatch, CH.evPreviewNav, CH.evWatchShot, CH.evUpdateState]
+const EVENT_CHANNELS: EventChannel[] = [
+  CH.evSession,
+  CH.evGraphPatch,
+  CH.evPreviewNav,
+  CH.evWatchShot,
+  CH.evPreviewFreeze,
+  CH.evUpdateState,
+]
 
 const api = {
   /**

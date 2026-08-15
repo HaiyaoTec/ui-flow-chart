@@ -56,6 +56,12 @@ export default function PreviewPane({
   const [switching, setSwitching] = useState(false)
   /** 视图藏起时顶上的静帧 */
   const [frozen, setFrozen] = useState('')
+  /**
+   * 抓存档图期间顶上的静帧。与 frozen 分开存：那张是「视图已隐藏」的替身，
+   * 这张是视图仍然可见、只是被临时盖住，两者的生命周期互不相干，
+   * 共用一个 state 会互相清空。
+   */
+  const [captureFrame, setCaptureFrame] = useState('')
   /** 横屏：只改逻辑视口的宽高，UA 与像素比不变 */
   const [landscape, setLandscape] = useState(false)
   const device = orientDevice(getDevice(deviceId), landscape)
@@ -84,6 +90,41 @@ export default function PreviewPane({
         // 不清的话 DeviceFrame 重报出来的相同矩形会在这里被吃掉，催报等于没做
         lastRect.current = ''
         setReportNonce((n) => n + 1)
+      }),
+    []
+  )
+
+  /**
+   * 抓存档图期间的静帧。
+   *
+   * 存档图要设备原始分辨率，与预览的自适应比例不是一个倍率，Chromium 得临时
+   * 按另一个倍率重新光栅化再还原，这一去一回页面会按别的尺寸排一次版——
+   * 就是每抓一次图屏幕区闪一下的来由。主进程在抓图前把当前画面发过来盖住，
+   * 抓完发空串撤掉。
+   *
+   * 贴好之后要回执：主进程收到才会把界面提到网页之上。抢在前面提的话，
+   * 露出来的是界面自己的屏幕底板，等于把闪烁换了个样子。
+   */
+  useEffect(
+    () =>
+      on(CH.evPreviewFreeze, (p) => {
+        if (!p.image) {
+          setCaptureFrame('')
+          return
+        }
+        // 先解码再挂进 DOM：直接塞 src 的话第一帧是空的
+        const img = new Image()
+        const paint = (): void => {
+          setCaptureFrame(p.image)
+          // 隔两帧再回执，确保这张图已经进了合成结果
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => void invoke(CH.previewFreezeReady, { token: p.token }))
+          )
+        }
+        img.onload = paint
+        // 解码失败也要回执，否则主进程只能干等到超时
+        img.onerror = paint
+        img.src = p.image
       }),
     []
   )
@@ -317,7 +358,7 @@ export default function PreviewPane({
           onScreenRect={onScreenRect}
           onOverflowChange={setCropped}
           reportNonce={reportNonce}
-          frozen={viewHidden ? frozen : ''}
+          frozen={viewHidden ? frozen : captureFrame}
           hint={viewHidden && !frozen ? (switching ? '正在切换设备…' : '预览已暂时隐藏') : ''}
         />
       </div>

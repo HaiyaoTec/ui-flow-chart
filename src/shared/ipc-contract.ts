@@ -43,6 +43,8 @@ export const CH = {
   previewNavigate: 'preview:navigate',
   previewProbe: 'preview:probe',
   previewDiagnose: 'preview:diagnose',
+  /** 静帧已经贴到屏幕区上了。主进程等到这一声再把界面提上来，否则会先露出底板 */
+  previewFreezeReady: 'preview:freeze-ready',
   uiStack: 'ui:stack',
 
   updateCheck: 'update:check',
@@ -64,6 +66,8 @@ export const CH = {
   evGraphPatch: 'graph:patch',
   evPreviewNav: 'preview:nav-state',
   evWatchShot: 'watch:shot',
+  /** 抓存档图期间用静帧顶替屏幕区，image 为空表示撤掉 */
+  evPreviewFreeze: 'preview:freeze',
   evUpdateState: 'update:state',
 } as const
 
@@ -169,6 +173,7 @@ export interface IpcInvokeMap {
   [CH.previewNavigate]: { req: { url?: string; action?: 'back' | 'reload' }; res: void }
   [CH.previewProbe]: { req: void; res: unknown }
   [CH.previewDiagnose]: { req: void; res: PreviewDiagnosis }
+  [CH.previewFreezeReady]: { req: { token: number }; res: void }
   /**
    * 界面与预览的层级切换。
    *
@@ -202,6 +207,7 @@ export interface IpcEventMap {
   [CH.evGraphPatch]: GraphPatch
   [CH.evPreviewNav]: NavState
   [CH.evWatchShot]: { nodeId: string; file: string }
+  [CH.evPreviewFreeze]: { image: string; token: number }
   [CH.evUpdateState]: UpdateState
 }
 

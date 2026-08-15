@@ -2,7 +2,7 @@ import type { BaseWindow } from 'electron'
 import { CH, type Bounds, type NavState, type PreviewDiagnosis } from '@shared/ipc-contract'
 import { DEFAULT_DEVICE_ID, getDevice } from '@shared/devices'
 import type { DeviceSpec } from '@shared/types'
-import { computeFitScale, PageDriver } from './PageDriver'
+import { computeFitScale, PageDriver, type Screenshot } from './PageDriver'
 import { getUiContents, getUiView } from '../window'
 
 /**
@@ -13,6 +13,10 @@ import { getUiContents, getUiView } from '../window'
 const HOLD_SOFT_MS = 2500
 /** 非 open 场景（窗口缩放、面板展开）的绝对期限 */
 const HOLD_MAX_MS = 5000
+/** 等渲染进程贴静帧的上限。到点没回执就照常抓图，宁可闪一下也不能把探索卡住 */
+const FREEZE_ACK_MAX_MS = 300
+/** 抓图占住层级的上限 */
+const CAPTURE_MAX_MS = 3000
 /**
  * open 场景的绝对期限。要高于 goto 的最坏预算，到点强制放行是
  * 「预览永久空白」的最后一道防线。
@@ -66,6 +70,16 @@ export class PreviewManager {
   private applyChain: Promise<void> = Promise.resolve()
   /** 解绑当前窗口 resize 监听的函数 */
   private offResize: (() => void) | null = null
+  /** 界面视图当前是否在预览之上。抓存档图时要临时提上来，收尾要还原 */
+  private uiFront = false
+  /** 层级变更的代次。抓图收尾只在没人动过层级时才把预览放回上层 */
+  private stackGen = 0
+  /** 静帧的代次令牌，配合渲染进程的回执使用 */
+  private freezeGen = 0
+  /** 当前静帧的等待者：渲染进程报告贴好了就兑现 */
+  private freezeAck: { token: number; resolve: () => void } | null = null
+  /** 最近一次静帧的结果，供自动化验证读取 */
+  private freezeInfo: { used: boolean; acked: boolean; ms: number } = { used: false, acked: false, ms: 0 }
 
   /**
    * 绑定主窗口。
@@ -108,6 +122,8 @@ export class PreviewManager {
    */
   setStackFront(front: 'ui' | 'preview'): void {
     const win = this.win
+    this.uiFront = front === 'ui'
+    this.stackGen += 1
     if (!win || win.isDestroyed()) return
     const top = front === 'ui' ? getUiView() : this.driver.view
     if (!top) return
@@ -351,8 +367,10 @@ export class PreviewManager {
     let image = ''
     if (!visible && withSnapshot && this.driver.attached && this.driver.isVisible()) {
       try {
-        const shot = await this.driver.screenshot()
-        image = `data:image/jpeg;base64,${shot.jpegBase64}`
+        // 占位只需要一帧当前画面，不必走设备原始分辨率那条路——
+        // 那条会触发合成面重新光栅化，既慢又会在隐藏前先闪一下
+        const frame = await this.driver.capturePreviewFrame()
+        if (frame) image = `data:image/jpeg;base64,${frame}`
       } catch {
         // 抓不到就退回文字占位，不影响隐藏本身
       }
@@ -372,6 +390,81 @@ export class PreviewManager {
     // 等待新矩形期间只记意愿，不真的显示——否则又会在旧位置画一帧
     this.driver.setVisible(visible && !this.awaitingPane)
     return { image }
+  }
+
+  /**
+   * 抓一张存档图，期间用静帧顶住屏幕区。
+   *
+   * 存档图要设备原始分辨率（clip.scale = 像素比），而预览是按自适应比例显示的；
+   * 两个倍率不一致时 Chromium 必须临时按请求的倍率重新光栅化整块合成面，抓完再还原，
+   * 这一去一回期间页面按另一个尺寸排了一次版——看上去就是每抓一次图闪一下。
+   *
+   * 所以先用 capturePage 取一帧当前画面（它拿的是合成器已有的帧，不触发重排），
+   * 把界面视图提到预览之上盖住屏幕区，再去抓存档图。原生视图并未隐藏，
+   * 仍在正常出帧，CDP 抓图不受影响。
+   */
+  async captureArchival(): Promise<Screenshot> {
+    if (!this.driver.attached) throw new Error('预览视图尚未创建')
+    const ui = getUiContents()
+    this.freezeInfo = { used: false, acked: false, ms: 0 }
+    const frame = ui && this.driver.isVisible() ? await this.driver.capturePreviewFrame().catch(() => '') : ''
+    // 弹层已经把界面提上来时不插手，免得收尾把它按回去、弹层反被网页盖住
+    const raise = Boolean(frame) && !this.uiFront
+    if (frame) {
+      const token = ++this.freezeGen
+      const t0 = Date.now()
+      const painted = new Promise<boolean>((resolve) => {
+        this.freezeAck = { token, resolve: () => resolve(true) }
+        // 渲染进程没回执（正在重载、图片解码失败）也要继续，不能把抓图卡在这
+        setTimeout(() => resolve(false), FREEZE_ACK_MAX_MS)
+      })
+      ui?.send(CH.evPreviewFreeze, { image: `data:image/jpeg;base64,${frame}`, token })
+      // 必须等静帧真的画上去再提界面。抢在前面提的话，
+      // 那几帧露出来的是界面自己的屏幕底板，等于把闪烁换了个样子
+      const acked = await painted
+      this.freezeAck = null
+      this.freezeInfo = { used: true, acked, ms: Date.now() - t0 }
+      if (process.env.UFC_TRACE === '1') {
+        console.log(`[preview] 静帧${acked ? `已贴好（${Date.now() - t0}ms）` : '回执超时，照常抓图'}`)
+      }
+      if (raise) this.setStackFront('ui')
+    }
+    // 界面在上时鼠标事件归界面。抓图万一卡住，不能让预览一直点不动，
+    // 到点无条件放回去——那时最多闪一下，总好过操作台失灵
+    const gen = this.stackGen
+    const watchdog = raise ? setTimeout(() => this.restoreStack(gen), CAPTURE_MAX_MS) : null
+    try {
+      return await this.driver.screenshot()
+    } finally {
+      if (watchdog) clearTimeout(watchdog)
+      if (frame) {
+        if (raise) this.restoreStack(gen)
+        ui?.send(CH.evPreviewFreeze, { image: '', token: 0 })
+      }
+    }
+  }
+
+  /**
+   * 把预览放回上层，前提是这期间没人动过层级。
+   *
+   * 抓图途中可能有弹层把界面提上来，这时按原计划放回去会让网页盖住弹层，
+   * 所以以代次为准：不是自己那一次抬起来的就不管。
+   */
+  private restoreStack(gen: number): void {
+    if (this.stackGen !== gen) return
+    this.setStackFront('preview')
+  }
+
+  /** 最近一次抓存档图时静帧的表现 */
+  lastFreezeInfo(): { used: boolean; acked: boolean; ms: number } {
+    return this.freezeInfo
+  }
+
+  /** 渲染进程报告静帧已贴好。过期令牌一律忽略 */
+  noteFreezePainted(token: number): void {
+    if (this.freezeAck?.token !== token) return
+    this.freezeAck.resolve()
+    this.freezeAck = null
   }
 
   /**
