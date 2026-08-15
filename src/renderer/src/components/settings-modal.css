@@ -33,7 +33,9 @@
   border-color: transparent;
   border-radius: var(--ctl-r);
   min-height: var(--ctl-h);
-  padding: 0 9px;
+  /* 与侧边栏导航取同一个值：选中态的左侧色条也是 2px、贴着按钮左缘，
+     内边距不一致的话，色条到图标的间距两处就对不上 */
+  padding: 0 14px;
   font-size: 13px;
 }
 .settings-rail button .icon {
