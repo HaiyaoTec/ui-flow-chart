@@ -36,6 +36,8 @@ const LOG_TAIL_BYTES = 256 * 1024
 const MAX_RECORDS = 4000
 /** 接管期控件事件带多少条 */
 const MAX_EVENTS = 1000
+/** AI 决策录像带多少条 */
+const MAX_AI = 2000
 /** 缩略图最多带几张 */
 const MAX_SHOTS = 12
 
@@ -104,6 +106,30 @@ function scrubEvent(e: Record<string, unknown>): Record<string, unknown> {
   void label
   void value
   return rest
+}
+
+/**
+ * AI 决策录像的脱敏。
+ *
+ * 基础级只留骨架：第几步、耗时、成功还是解析失败。这已经够回答
+ * 「是不是 AI 一直在超时」「是不是反复解析失败」这类问题。
+ * 决策内容（界面标题、连线文案、填入的值）与地址属于目标站信息，归复现级——
+ * 而回放正是靠它，所以复现级必须原样保留。
+ */
+function scrubAi(r: Record<string, unknown>, repro: boolean): Record<string, unknown> {
+  if (repro) return r
+  const ask = (r.ask ?? {}) as Record<string, unknown>
+  const action = r.action as Record<string, unknown> | undefined
+  return {
+    t: r.t,
+    runId: r.runId,
+    kind: r.kind,
+    ms: r.ms,
+    ask: { step: ask.step, attempt: ask.attempt, sig: ask.sig, elements: ask.elements, notices: ask.notices },
+    // 动作类型不含目标站内容，但对判断「AI 在原地打转」很关键
+    action: action ? { action: action.action, targetIdx: action.targetIdx } : undefined,
+    error: typeof r.error === 'string' ? scrubText(r.error, false) : undefined,
+  }
 }
 
 /** 图谱：结构与计数任何级别都带，页面内容只在复现级带 */
@@ -218,6 +244,8 @@ export function buildDiagnose(opts: DiagnoseOptions): DiagnoseResult {
     }
     body.records = readJsonl(join(dir, 'session.jsonl'), MAX_RECORDS).map((r) => scrubRecord(r, repro))
     body.events = readJsonl(join(dir, 'events.jsonl'), MAX_EVENTS).map(scrubEvent)
+    body.ai = readJsonl(join(dir, 'ai.jsonl'), MAX_AI).map((r) => scrubAi(r, repro))
+    included.push(repro ? 'AI 决策录像（可在本机回放这一轮探索）' : 'AI 决策的时序与成败（不含决策内容）')
     if (graph) body.graph = scrubGraph(graph, repro)
   } else {
     excluded.push('项目相关的全部内容（本次未指定项目）')

@@ -209,6 +209,17 @@ export class GraphStore {
     this.appendSafe('session.jsonl', JSON.stringify({ t: Date.now(), ...entry }) + '\n')
   }
 
+  /**
+   * AI 决策录像。
+   *
+   * 每一步问了什么（只记可核对的要点，不记截图与完整提示词）、答了什么，
+   * 按顺序追加。有了它，本机可以把当时那一整轮探索原样重放一遍——
+   * 探索走偏这类问题光看图谱结果是判断不出来的，得看它当时依据什么做的决定。
+   */
+  appendAi(entry: Record<string, unknown>): void {
+    this.appendSafe('ai.jsonl', JSON.stringify({ t: Date.now(), ...entry }) + '\n')
+  }
+
   /** 人工接管期的控件事件。只记控件标识，不含任何输入值 */
   appendEvents(entries: object[], meta?: Record<string, unknown>): void {
     if (!entries.length) return

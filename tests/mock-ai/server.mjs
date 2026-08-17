@@ -2,13 +2,38 @@
 // 它按「当前页面 + 已推进到第几步」决定动作，而不是盲目按调用次数返回，
 // 这样即使探索循环多跑或少跑一轮，脚本依然对得上。
 //
-//   node tests/mock-ai/server.mjs [port] [scenario]
-//   scenario: normal | badjson | flaky
+//   node tests/mock-ai/server.mjs [port] [scenario] [录像文件]
+//   scenario: normal | badjson | flaky | replay
+//
+// replay 模式用于回放用户回传的诊断包：不再自己决定动作，而是按录像里的顺序
+// 把当时那一轮的决策原样吐回去。目标站要能访问，页面结构也要与当时一致，
+// 对不上时会在控制台把差异打出来，而不是默默给出一个错位的动作。
+import { readFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 
 // 注意别用 4190：它在 Chromium 的受限端口黑名单里（sieve），fetch 会直接以 bad port 失败
 const PORT = Number(process.argv[2] || 4192)
 const SCENARIO = process.argv[3] || 'normal'
+const TAPE_FILE = process.argv[4] || ''
+
+/**
+ * 录像。
+ *
+ * 既接 ai.jsonl（项目目录里的原始录像），也接诊断包 JSON（用户回传的那个文件），
+ * 因为作者手上多半只有后者。
+ */
+function loadTape(file) {
+  const raw = readFileSync(file, 'utf8')
+  const rows = raw.trimStart().startsWith('{')
+    ? (JSON.parse(raw).ai ?? [])
+    : raw.split(String.fromCharCode(10)).filter(Boolean).map((l) => JSON.parse(l))
+  const usable = rows.filter((r) => r.kind === 'decide' && r.action)
+  if (!usable.length) throw new Error('录像里没有可回放的决策。诊断包必须是「复现级」，基础级不含决策内容')
+  return usable
+}
+
+const tape = SCENARIO === 'replay' ? loadTape(TAPE_FILE) : []
+let tapeAt = 0
 
 /** 每个页面推进到第几步 */
 const progress = new Map()
@@ -261,6 +286,17 @@ function extractUserText(body) {
 }
 
 const server = createServer((req, res) => {
+  /*
+   * 只有 POST 才算一次问询。
+   *
+   * 探活用的是 GET，如果一并当成请求处理，回放的进度会被探活推着走一步——
+   * 第一次真正的决策就已经错位了，而错位后的动作看上去仍然「合理」，
+   * 极难发现。
+   */
+  if (req.method !== 'POST') {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    return res.end(JSON.stringify({ ok: true, scenario: SCENARIO }))
+  }
   let raw = ''
   req.on('data', (c) => (raw += c))
   req.on('end', () => {
@@ -293,6 +329,36 @@ const server = createServer((req, res) => {
 
     callCount += 1
 
+    // 回放：按录像顺序返回当时的决策，并核对是不是走在同一条路上
+    if (SCENARIO === 'replay') {
+      if (tapeAt >= tape.length) {
+        console.log(`[replay] 录像已放完（共 ${tape.length} 步），继续请求将返回 done`)
+        const done = { action: 'done', reason: '录像已放完', screen: { id: 'replay-end', title: '回放结束', lane: 'replay', kind: 'normal' }, edgeLabel: '结束' }
+        const payload = isAnthropic
+          ? { content: [{ type: 'tool_use', name: 'decide_action', input: done }], model: body.model }
+          : { choices: [{ message: { content: JSON.stringify(done) } }], model: body.model }
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        return res.end(JSON.stringify(payload))
+      }
+      const row = tape[tapeAt++]
+      const nowUrl = currentUrl(text)
+      const nowEls = parseElements(text).length
+      // 对不上就说出来。回放本来就依赖目标站与当时一致，
+      // 悄悄给一个错位的动作只会把人引到错误的结论上
+      if (row.ask?.url && nowUrl && row.ask.url !== nowUrl) {
+        console.log(`[replay] 第 ${tapeAt} 步地址对不上：录像 ${row.ask.url} · 当前 ${nowUrl}`)
+      } else if (typeof row.ask?.elements === 'number' && row.ask.elements !== nowEls) {
+        console.log(`[replay] 第 ${tapeAt} 步元素数对不上：录像 ${row.ask.elements} · 当前 ${nowEls}`)
+      } else {
+        console.log(`[replay] 第 ${tapeAt}/${tape.length} 步 · ${row.action.action}`)
+      }
+      const payload = isAnthropic
+        ? { content: [{ type: 'tool_use', name: 'decide_action', input: row.action }], model: body.model }
+        : { choices: [{ message: { content: JSON.stringify(row.action) } }], model: body.model }
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      return res.end(JSON.stringify(payload))
+    }
+
     // 故障注入：第二次调用返回坏 JSON，验证解析重试与降级
     if (SCENARIO === 'badjson' && callCount === 2) {
       const payload = isAnthropic
@@ -316,4 +382,6 @@ const server = createServer((req, res) => {
   })
 })
 
-server.listen(PORT, () => console.log(`mock-ai (${SCENARIO}): http://localhost:${PORT}`))
+server.listen(PORT, () =>
+  console.log(`mock-ai (${SCENARIO}${SCENARIO === 'replay' ? ` · ${tape.length} 步录像` : ''}): http://localhost:${PORT}`)
+)

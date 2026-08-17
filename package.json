@@ -28,7 +28,8 @@
     "selfcheck": "powershell -ExecutionPolicy Bypass -File scripts/selfcheck.ps1",
     "explore-check": "node scripts/explore-check.mjs",
     "test-site": "node test-site/serve.mjs",
-    "mock-ai": "node tests/mock-ai/server.mjs"
+    "mock-ai": "node tests/mock-ai/server.mjs",
+    "replay": "node scripts/replay.mjs"
   },
   "dependencies": {
     "electron-updater": "^6.8.9",

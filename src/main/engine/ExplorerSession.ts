@@ -578,8 +578,23 @@ export class ExplorerSession {
       this.abort = new AbortController()
       this.aiCalls += 1
       this.emit({ kind: 'ai-request', step: this.step })
+      const askedAt = Date.now()
+      /*
+       * 录像的输入侧只记可核对的要点：地址、界面签名、元素个数、可选动作数。
+       * 截图与完整提示词一概不记——前者体积上不可行，后者是页面原文，
+       * 而回放时这些本来就会由当时的页面重新产生，记下来只为对齐时能核对。
+       */
+      const ask = {
+        step: this.step,
+        attempt,
+        url: probe.url,
+        sig: signatureHash(probe),
+        elements: probe.elements.length,
+        notices: probe.notices.length,
+        forbidden: this.forbidden.length,
+      }
       try {
-        return await this.deps.ai.decide(
+        const action = await this.deps.ai.decide(
           {
             goal: this.goal,
             step: this.step,
@@ -599,14 +614,18 @@ export class ExplorerSession {
           },
           this.abort.signal
         )
+        store.appendAi({ runId: this.runId, kind: 'decide', ms: Date.now() - askedAt, ask, action })
+        return action
       } catch (e) {
         if (this.pauseRequested || this.stopRequested || this.takeoverRequested) return null
         if (e instanceof ActionParseError) {
           lastErr = e.message
+          store.appendAi({ runId: this.runId, kind: 'parse-error', ms: Date.now() - askedAt, ask, error: e.message })
           this.log('warn', `AI 输出解析失败（第 ${attempt + 1} 次）：${e.message}`)
           continue
         }
         const msg = e instanceof Error ? e.message : String(e)
+        store.appendAi({ runId: this.runId, kind: 'call-error', ms: Date.now() - askedAt, ask, error: msg })
         this.log('warn', `AI 调用失败：${msg}`)
         if (attempt === MAX_PARSE_RETRY) throw e
         await delay(1200 * (attempt + 1))
