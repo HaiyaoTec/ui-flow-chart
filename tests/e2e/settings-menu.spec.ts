@@ -7,7 +7,7 @@ import { ipc, launchApp } from './helpers'
  * 三项设置从各自的位置收拢过来之后，最容易悄悄坏掉的是「入口还在、但某一项进不去」，
  * 所以这里逐项验证可达：主题子菜单要真的改主题，另外两项要真的定位到对应板块。
  */
-test('设置入口能到达主题、AI 接口、软件更新三项', async () => {
+test('设置入口能到达主题、AI 接口、软件更新、诊断与日志四项', async () => {
   const { app, window } = await launchApp()
   try {
     const trigger = window.locator('.settings-trigger')
@@ -51,6 +51,14 @@ test('设置入口能到达主题、AI 接口、软件更新三项', async () =>
     await trigger.click()
     await pop.getByRole('button', { name: /软件更新/ }).click()
     await expect(panel.locator('.settings-rail button.on')).toHaveText('软件更新')
+    await window.keyboard.press('Escape')
+    await expect(panel).toHaveCount(0)
+
+    // 诊断与日志：用户报障时要能一步找到，不必先进别的板块再切过去
+    await trigger.click()
+    await pop.getByRole('button', { name: /诊断与日志/ }).click()
+    await expect(panel.locator('.settings-rail button.on')).toHaveText('诊断与日志')
+    await expect(panel).toContainText('导出诊断包')
     await window.keyboard.press('Escape')
     await expect(panel).toHaveCount(0)
 

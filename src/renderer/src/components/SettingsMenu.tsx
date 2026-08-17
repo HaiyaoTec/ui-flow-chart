@@ -125,6 +125,19 @@ export default function SettingsMenu({ compact = false }: { compact?: boolean })
               <span className="grow">软件更新</span>
               <Icon name="caretRight" size={14} />
             </button>
+
+            <button
+              className="row"
+              onMouseEnter={() => setSub('')}
+              onClick={() => {
+                setPanel('diagnose')
+                close()
+              }}
+            >
+              <Icon name="diagnose" />
+              <span className="grow">诊断与日志</span>
+              <Icon name="caretRight" size={14} />
+            </button>
           </div>
         )}
       </div>

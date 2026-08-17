@@ -456,6 +456,11 @@ export class PreviewManager {
     this.setStackFront('preview')
   }
 
+  /** 当前谁在上。抓存档图与自动化验证都要读它 */
+  stackFront(): 'ui' | 'preview' {
+    return this.uiFront ? 'ui' : 'preview'
+  }
+
   /** 最近一次抓存档图时静帧的表现 */
   lastFreezeInfo(): { used: boolean; acked: boolean; ms: number } {
     return this.freezeInfo

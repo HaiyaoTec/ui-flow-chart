@@ -1,9 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { DEVICE_CATEGORIES, devicesByCategory, getDevice } from '@shared/devices'
-import { CH } from '@shared/ipc-contract'
 import type { DeviceCategory } from '@shared/types'
-import { invoke } from '../ipc'
+import { holdUiFront } from '../uiStack'
 import Icon from './Icon'
 import './device-picker.css'
 
@@ -28,6 +27,8 @@ export default function DevicePicker({ value, onChange, disabled, className, ove
   const [rect, setRect] = useState<{ left: number; top: number; drop: 'down' | 'up' } | null>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const popRef = useRef<HTMLDivElement>(null)
+  /** 提起界面的释放函数。展开时持有，收起时放开 */
+  const releaseFront = useRef<(() => void) | null>(null)
 
   const current = getDevice(value)
   const list = devicesByCategory(cat)
@@ -35,7 +36,15 @@ export default function DevicePicker({ value, onChange, disabled, className, ove
   function toggle(next: boolean) {
     if (disabled) return
     setOpen(next)
-    if (overlay) void invoke(CH.uiStack, { front: next ? 'ui' : 'preview' })
+    // 压在网页上的弹层：展开时把界面提到最上层，关闭后放开。
+    // 走统一的持有计数，免得与同时开着的弹窗互相把对方压到网页底下
+    if (overlay) {
+      if (next) releaseFront.current ??= holdUiFront()
+      else {
+        releaseFront.current?.()
+        releaseFront.current = null
+      }
+    }
     // 每次展开都从当前设备所在的分类开始，而不是上次翻到哪儿
     if (next) setCat(current.category ?? 'iphone')
   }

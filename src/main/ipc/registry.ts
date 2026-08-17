@@ -223,6 +223,8 @@ function registerTestHooks(getWindow: () => BaseWindow | null): void {
   ipcMain.handle('test:wait-stable', async () => preview.driver.waitStable())
   ipcMain.handle('test:graph', async (_e, projectId: string) => loadGraph(projectId))
   ipcMain.handle('test:preview-debug', async () => preview.debugInfo())
+  /** 当前谁在上。弹层能不能盖住网页全看它，而这件事截图断言不了 */
+  ipcMain.handle('test:ui-stack', async () => ({ front: preview.stackFront() }))
   /** 主进程日志文件的末尾。用来验证异常真的落了盘，而不是只在控制台闪了一下 */
   ipcMain.handle('test:log-tail', async () => ({ file: log.file(), text: log.tail(64 * 1024) }))
   /** 走一次带静帧的存档抓图，验证「贴静帧 → 收回执 → 抬界面 → 抓图 → 复位」这条链 */

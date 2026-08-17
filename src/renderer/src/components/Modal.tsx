@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react'
+import { holdUiFront } from '../uiStack'
 import './modal.css'
 
 /**
@@ -62,6 +63,17 @@ export default function Modal({
   const idRef = useRef<symbol | null>(null)
   idRef.current ??= Symbol('modal')
   const cardRef = useRef<HTMLDivElement>(null)
+
+  /*
+   * 弹窗打开期间把界面提到网页之上。
+   *
+   * 预览网页是原生视图，永远画在 HTML 之上；在真机预览页打开设置面板时，
+   * 手机那一块会直接压在面板上，面板右半边被盖住看不全。
+   */
+  useEffect(() => {
+    if (!open) return
+    return holdUiFront()
+  }, [open])
 
   useEffect(() => {
     if (!open) return

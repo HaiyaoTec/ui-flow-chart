@@ -1,9 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { CH } from '@shared/ipc-contract'
-import { invoke } from '../ipc'
 import Icon from './Icon'
 import './select.css'
+import { holdUiFront } from '../uiStack'
 
 export interface SelectOption {
   value: string
@@ -63,6 +62,8 @@ export default function Select({
   const triggerRef = useRef<HTMLButtonElement>(null)
   const popRef = useRef<HTMLDivElement>(null)
   const openRef = useRef(false)
+  /** 提起界面的释放函数。展开时持有，收起时放开 */
+  const releaseFront = useRef<(() => void) | null>(null)
 
   const current = options.find((o) => o.value === value)
 
@@ -70,8 +71,15 @@ export default function Select({
     if (disabled) return
     openRef.current = next
     setOpen(next)
-    // 压在网页上的弹层：展开时把界面提到最上层，关闭后把预览放回去
-    if (overlay) void invoke(CH.uiStack, { front: next ? 'ui' : 'preview' })
+    // 压在网页上的弹层：展开时把界面提到最上层，关闭后放开。
+    // 走统一的持有计数，免得与同时开着的弹窗互相把对方压到网页底下
+    if (overlay) {
+      if (next) releaseFront.current ??= holdUiFront()
+      else {
+        releaseFront.current?.()
+        releaseFront.current = null
+      }
+    }
     if (next) setActive(Math.max(0, options.findIndex((o) => o.value === value)))
   }
 
