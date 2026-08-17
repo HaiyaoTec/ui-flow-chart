@@ -49,6 +49,8 @@ export const CH = {
   diagnoseClientError: 'diagnose:client-error',
   /** 应用版本与运行环境。用户报障时第一件要问的就是版本，界面上得能看见 */
   appInfo: 'app:info',
+  /** 导出诊断包 */
+  diagnoseExport: 'diagnose:export',
   uiStack: 'ui:stack',
 
   updateCheck: 'update:check',
@@ -112,6 +114,25 @@ export interface NavState {
 export interface ExportResult {
   path: string
   bytes: number
+}
+
+/**
+ * 诊断包的采集范围。
+ *
+ * 脱敏与可复现天生冲突：剥掉目标地址就无法重放。所以级别由用户自己选，
+ * 而不是替他决定——basic 不含目标站的任何内容，repro 带上地址与界面标题。
+ */
+export interface DiagnoseOptions {
+  projectId?: string
+  level: 'basic' | 'repro'
+  /** 是否带界面缩略图。原始分辨率存档图任何级别都不带 */
+  includeShots?: boolean
+}
+
+export interface DiagnoseResult extends ExportResult {
+  /** 包里实际带了什么、刻意排除了什么。原样写进包里，也回给界面展示 */
+  included: string[]
+  excluded: string[]
 }
 
 /** 应用版本与运行环境 */
@@ -189,6 +210,7 @@ export interface IpcInvokeMap {
   [CH.previewDiagnose]: { req: void; res: PreviewDiagnosis }
   [CH.previewFreezeReady]: { req: { token: number }; res: void }
   [CH.appInfo]: { req: void; res: AppInfo }
+  [CH.diagnoseExport]: { req: DiagnoseOptions; res: DiagnoseResult }
   [CH.diagnoseClientError]: {
     req: { source: string; message: string; stack?: string; componentStack?: string }
     res: void

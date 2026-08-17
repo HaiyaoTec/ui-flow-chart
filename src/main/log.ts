@@ -109,6 +109,20 @@ export function describeError(e: unknown): string {
  * 用户名本身就是个人信息，而定位缺陷只需要文件名与行号。
  */
 export function stripPaths(text: string): string {
+  /*
+   * 网址要原样留下。
+   *
+   * 它们同样由斜杠分段，被当成本机路径处理会被截成「…/xxx.html」——
+   * 目标地址就此残缺，既不能用来复现，后续按网址做的脱敏也认不出它了。
+   * split 带捕获组时奇数下标就是被捕获的网址，跳过即可。
+   */
+  return text
+    .split(/(https?:\/\/[^\s'"）)]+)/g)
+    .map((part, i) => (i % 2 === 1 ? part : stripLocalPaths(part)))
+    .join('')
+}
+
+function stripLocalPaths(text: string): string {
   return text
     .replace(/[A-Za-z]:\\[^\s)]*?([^\\/\s)]+\.[a-z]+)/g, '…\\$1')
     .replace(/\/(?:[^\s/)]+\/)+([^\s/)]+\.[a-z]+)/g, '…/$1')

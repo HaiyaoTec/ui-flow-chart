@@ -20,6 +20,7 @@ import {
   partitionOf,
 } from '../store/projects'
 import { appInfo } from '../appInfo'
+import { buildDiagnose } from '../diagnose'
 import { log, stripPaths } from '../log'
 import { getSettings, setSettings } from '../store/settings'
 import { updater } from '../updater'
@@ -137,6 +138,7 @@ export function registerIpc(getWindow: () => BaseWindow | null): void {
   handle(CH.previewDiagnose, () => preview.diagnose())
   handle(CH.previewFreezeReady, ({ token }) => preview.noteFreezePainted(token))
   handle(CH.appInfo, () => appInfo())
+  handle(CH.diagnoseExport, (opts) => buildDiagnose(opts))
   handle(CH.diagnoseClientError, ({ source, message, stack, componentStack }) => {
     // 堆栈里的本机绝对路径含用户名，落盘前先抹掉
     const detail = [stack, componentStack].filter((s): s is string => Boolean(s)).map(stripPaths).join('\n')

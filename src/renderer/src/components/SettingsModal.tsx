@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react'
 import Icon, { type IconName } from './Icon'
 import Modal from './Modal'
 import AiSettingsPanel from './AiSettingsPanel'
+import DiagnoseSection from './DiagnoseSection'
 import UpdateSection from './UpdateSection'
 import './settings-modal.css'
 
-export type SettingsSection = 'ai' | 'update'
+export type SettingsSection = 'ai' | 'update' | 'diagnose'
 
 const SECTIONS: Array<{
   key: SettingsSection
@@ -27,6 +28,13 @@ const SECTIONS: Array<{
     icon: 'download',
     title: '软件更新',
     subtitle: '查看当前版本、手动检查，以及自动检查与后台下载的开关。',
+  },
+  {
+    key: 'diagnose',
+    label: '诊断与日志',
+    icon: 'diagnose',
+    title: '诊断与日志',
+    subtitle: '把定位问题需要的信息导出成一个文件。内容分级，带什么、不带什么都摆在下面由你决定。',
   },
 ]
 
@@ -78,6 +86,7 @@ export default function SettingsModal({ open, onClose, section = 'ai' }: Props) 
           </div>
           {cur === 'ai' && <AiSettingsPanel />}
           {cur === 'update' && <UpdateSection embedded />}
+          {cur === 'diagnose' && <DiagnoseSection />}
         </div>
       </div>
     </Modal>

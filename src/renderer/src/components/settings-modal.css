@@ -100,3 +100,73 @@
   margin-top: 3px;
   line-height: 1.6;
 }
+
+/* 诊断板块：勾选项要把「勾了会带什么」说清楚，
+   所以每项是「标题 + 一行说明」的两行结构，而不是一句话的复选框 */
+.diag-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 14px 0 16px;
+}
+.diag-opt {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.diag-opt:hover {
+  background: var(--panel-2);
+}
+.diag-opt input {
+  margin-top: 2px;
+  flex: none;
+}
+.diag-opt span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.diag-opt strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+.diag-opt em {
+  font-style: normal;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+/* 导出结果：两栏对照「包含 / 不包含」。
+   这份清单同时写进包里，用户与作者看到的是同一份 */
+.diag-result {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+.diag-lists {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 10px;
+}
+.diag-cap {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.diag-lists ul {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.diag-lists ul.off {
+  color: var(--muted);
+}
