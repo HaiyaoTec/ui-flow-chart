@@ -210,9 +210,11 @@ export class GraphStore {
   }
 
   /** 人工接管期的控件事件。只记控件标识，不含任何输入值 */
-  appendEvents(entries: object[]): void {
+  appendEvents(entries: object[], meta?: Record<string, unknown>): void {
     if (!entries.length) return
-    this.appendSafe('events.jsonl', entries.map((e) => JSON.stringify(e)).join('\n') + '\n')
+    // 段落标记逐条合并：这个文件同样是多轮平铺追加的，
+    // 不带标记就分不出某条事件属于哪一轮的第几次接管
+    this.appendSafe('events.jsonl', entries.map((e) => JSON.stringify({ ...meta, ...e })).join('\n') + '\n')
   }
 
   patchOf(lanes: FlowLane[], nodes: FlowNode[], edges: FlowEdge[]): GraphPatch {

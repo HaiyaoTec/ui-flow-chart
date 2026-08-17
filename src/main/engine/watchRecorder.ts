@@ -74,6 +74,8 @@ export class WatchRecorder {
       onPatch: (patch: Omit<GraphPatch, 'projectId'>) => void
       /** 抓存档图。与探索期同源，抓图时会用静帧顶住屏幕区 */
       capture: () => Promise<{ png: Buffer; jpegBase64: string }>
+      /** 随每条控件事件一起落盘的段落标记：哪一轮、第几次接管 */
+      meta?: Record<string, unknown>
       maxScreens: number
     }
   ) {}
@@ -112,7 +114,7 @@ export class WatchRecorder {
 
       if (sig !== this.lastSig && sig === this.pendingSig) {
         const events = ((await this.driver.evalInPage(DRAIN_EVENTS).catch(() => [])) as WatchEvent[]) ?? []
-        this.store.appendEvents(events)
+        this.store.appendEvents(events, this.opts.meta)
 
         const existing = this.store.findBySignature(sig)
         let nodeId: string

@@ -7,6 +7,7 @@ import {
   type SessionSnapshot,
 } from '@shared/types'
 import { createAiClient } from '../ai'
+import { log } from '../log'
 import { getProject, partitionOf, touchProject, updateProjectRun } from '../store/projects'
 import { ExplorerSession } from './ExplorerSession'
 import { preview } from './previewManager'
@@ -57,6 +58,14 @@ class SessionManager {
   private persistRun(projectId: string, snapshot: SessionSnapshot, reason?: string): void {
     try {
       const nodes = this.session?.graphNodeCount() ?? 0
+      /*
+       * 停止原因只补不抹。
+       *
+       * lastRun 是单槽位覆盖写，而「继续」会带着空 reason 走一遍 state-changed：
+       * 原先那次覆盖会把「已达步数上限」之类的触顶原因整个抹掉，
+       * 用户若在此时关掉应用，为什么停的就永久丢了。
+       */
+      const prev = getProject(projectId)?.lastRun?.reason
       updateProjectRun(projectId, {
         state: snapshot.state,
         steps: snapshot.step,
@@ -65,7 +74,7 @@ class SessionManager {
         nodes,
         startedAt: snapshot.startedAt ?? new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        reason: reason ?? snapshot.reason,
+        reason: reason ?? snapshot.reason ?? prev,
       })
     } catch {
       // 落盘失败不该影响探索本身
@@ -132,20 +141,32 @@ class SessionManager {
     )
   }
 
+  /**
+   * 没有会话时的控制指令也要留痕。
+   *
+   * 应用重启后会话只活在内存里、已经不存在了，这时用户点「继续」是彻底的空操作：
+   * 会话记录写不了（没有 store），界面上也没有任何反馈。落一条主日志是这里
+   * 唯一能留下的证据，否则事后完全看不出用户点过。
+   */
+  private noSession(op: string): SessionSnapshot {
+    log.warn('session', `控制指令 ${op} 无处可发：当前没有活动会话`)
+    return this.snapshot()
+  }
+
   pause(): SessionSnapshot {
-    return this.session?.pause() ?? this.snapshot()
+    return this.session?.pause() ?? this.noSession('pause')
   }
   resume(): SessionSnapshot {
-    return this.session?.resume() ?? this.snapshot()
+    return this.session?.resume() ?? this.noSession('resume')
   }
   stop(): SessionSnapshot {
-    return this.session?.stop() ?? this.snapshot()
+    return this.session?.stop() ?? this.noSession('stop')
   }
   async takeoverStart(): Promise<SessionSnapshot> {
-    return (await this.session?.takeoverStart()) ?? this.snapshot()
+    return (await this.session?.takeoverStart()) ?? this.noSession('takeover-start')
   }
   async takeoverEnd(): Promise<SessionSnapshot> {
-    return (await this.session?.takeoverEnd()) ?? this.snapshot()
+    return (await this.session?.takeoverEnd()) ?? this.noSession('takeover-end')
   }
 }
 

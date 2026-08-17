@@ -284,6 +284,10 @@ export interface SessionSnapshot {
   reason?: string
   lastError?: string
   currentNodeId?: string
+  /** 本次运行的标识。诊断记录按它切分运行，界面上不展示 */
+  runId?: string
+  /** 本轮实际在跑的时长，暂停与人工接管期间不计 */
+  elapsedMs?: number
 }
 
 export type SessionEvent =

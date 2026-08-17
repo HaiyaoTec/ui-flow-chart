@@ -1,4 +1,5 @@
-﻿import {
+﻿import { randomUUID } from 'node:crypto'
+import {
   DEFAULT_BUDGETS,
   MANUAL_LANE_ID,
   MANUAL_LANE_TITLE,
@@ -37,6 +38,12 @@ export interface SessionDeps {
   /** 增量补丁。收一个 patch 对象而不是三个数组：收尾整理还要送更新与删除 */
   emitPatch: (patch: Omit<GraphPatch, 'projectId'>) => void
 }
+
+/** 计时状态：只有这些状态算「正在跑」，暂停与等人期间时长不走表 */
+const RUNNING_STATES: SessionState[] = ['launching', 'observing', 'thinking', 'acting', 'resuming', 'finishing']
+
+type BudgetKey = 'steps' | 'aiCalls' | 'screens' | 'duration'
+type ControlOp = 'pause' | 'resume' | 'stop' | 'takeover-start' | 'takeover-end'
 
 const MAX_PARSE_RETRY = 2
 const MAX_SAME_SCREEN_FAILS = 3
@@ -103,6 +110,32 @@ export class ExplorerSession {
   private staleRounds = 0
   private fallbackStreak = 0
 
+  /**
+   * 本次运行的标识。
+   *
+   * session.jsonl 是追加文件，同一个项目跑多少轮都平铺在里面。没有它，
+   * 事后只能靠「出现 launching」「step 归零」去猜运行边界，跨轮的耗时算不准。
+   */
+  private runId = ''
+  /** 之前各个运行区段累计的时长 */
+  private runMsBefore = 0
+  /** 当前运行区段的起点；0 表示此刻不在跑 */
+  private segmentAt = 0
+  /**
+   * 四项预算的起算点。
+   *
+   * 预算的语义是「这一轮连续探索花多少」，而不是「这个项目历史上花了多少」：
+   * - screens 的初值是图谱里已有的节点数，不减去起算点的话，
+   *   二次探索一开始就贴着上限，还会报出「已达截图数上限（300 张）」这种
+   *   让人以为本轮抓了 300 张的说法
+   * - 用户点「继续」等于明确表示「再给一轮」，把起算点推到当前值，
+   *   「继续」才真的能继续
+   */
+  private base = { step: 0, aiCalls: 0, screens: 0, ms: 0 }
+  /** 人工接管区间的起点与序号，用于把接管段落标进记录 */
+  private takeoverAt = 0
+  private takeoverSeq = 0
+
   constructor(private readonly deps: SessionDeps) {}
 
   /* ------------------------------- 对外接口 ------------------------------- */
@@ -119,6 +152,28 @@ export class ExplorerSession {
       reason: this.reason,
       lastError: this.lastError,
       currentNodeId: this.currentNodeId ?? undefined,
+      runId: this.runId || undefined,
+      elapsedMs: this.elapsedMs(),
+    }
+  }
+
+  /**
+   * 本轮实际在跑的时长。
+   *
+   * 只累计运行区段：暂停与人工接管期间不计。原先直接拿墙钟减开始时间，
+   * 接管着改十分钟验证码，回来一跑就直接触顶。
+   */
+  private elapsedMs(): number {
+    return this.runMsBefore + (this.segmentAt ? Date.now() - this.segmentAt : 0)
+  }
+
+  /** 相对本轮起算点的四项用量 */
+  private used(): { step: number; aiCalls: number; screens: number; ms: number } {
+    return {
+      step: this.step - this.base.step,
+      aiCalls: this.aiCalls - this.base.aiCalls,
+      screens: this.screens - this.base.screens,
+      ms: this.elapsedMs() - this.base.ms,
     }
   }
 
@@ -133,6 +188,13 @@ export class ExplorerSession {
     this.aiCalls = 0
     this.screens = this.store.get().nodes.length
     this.startedAt = new Date().toISOString()
+    this.runId = `r${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`
+    this.runMsBefore = 0
+    this.segmentAt = 0
+    this.takeoverAt = 0
+    this.takeoverSeq = 0
+    // 截图数的起算点是图谱里已有的节点数，见 base 的说明
+    this.base = { step: 0, aiCalls: 0, screens: this.screens, ms: 0 }
     this.reason = undefined
     this.lastError = undefined
     this.currentNodeId = null
@@ -150,6 +212,15 @@ export class ExplorerSession {
     this.staleRounds = 0
     this.fallbackStreak = 0
 
+    // 预算配置必须落盘：它只活在内存里，而事后判断「时长触顶」时
+    // 没有阈值可对照，连这一轮到底给了多少额度都无从考证
+    this.record({
+      kind: 'run-start',
+      targetUrl: project.targetUrl,
+      deviceId: project.deviceId,
+      budgets: this.budgets,
+      carriedScreens: this.screens,
+    })
     this.setState('launching')
     void this.runLoop()
     return this.snapshot()
@@ -157,8 +228,9 @@ export class ExplorerSession {
 
   pause(): SessionSnapshot {
     // 收尾是终端流程，「待会儿接着跑」在这里没有意义
-    if (this.state === 'finishing') return this.snapshot()
-    if (this.isRunning()) {
+    const accepted = this.state !== 'finishing' && this.isRunning()
+    this.control('pause', accepted)
+    if (accepted) {
       this.pauseRequested = true
       // 掐断在途的 AI 请求，不必等它慢慢超时
       this.abort?.abort(new Error('用户暂停'))
@@ -167,9 +239,27 @@ export class ExplorerSession {
   }
 
   resume(): SessionSnapshot {
-    if (this.state === 'paused') {
+    const accepted = this.state === 'paused'
+    this.control('resume', accepted)
+    if (accepted) {
       this.pauseRequested = false
       this.reason = undefined
+      /*
+       * 「继续」= 再给一轮完整预算。
+       *
+       * 原先这里只清了暂停标志：四项计数与时长基线一个都不动，
+       * 主循环重新进来第一件事就是再查一次预算，返回同一个原因，立刻又暂停。
+       * 触顶之后这个按钮是假的，只能重开一轮。
+       *
+       * 顺便复位三个「卡住」计数：那几个是「AI 连续没进展」的判据，
+       * 用户既然手动介入过，上一轮的连续性已经不成立了。
+       */
+      this.base = { step: this.step, aiCalls: this.aiCalls, screens: this.screens, ms: this.elapsedMs() }
+
+      this.fallbackStreak = 0
+      this.noProgress = 0
+      this.staleRounds = 0
+      this.screenFails.clear()
       this.setState('observing')
       void this.runLoop()
     }
@@ -177,6 +267,7 @@ export class ExplorerSession {
   }
 
   stop(): SessionSnapshot {
+    this.control('stop', true)
     this.stopRequested = true
     this.watcher?.stop()
     this.abort?.abort(new Error('用户结束'))
@@ -185,7 +276,9 @@ export class ExplorerSession {
 
   /** 进入人工接管：放开输入屏蔽，转为被动录制 */
   async takeoverStart(reasonText = '用户主动接管'): Promise<SessionSnapshot> {
-    if (this.state === 'awaiting_human') return this.snapshot()
+    const accepted = this.state !== 'awaiting_human'
+    this.control('takeover-start', accepted, reasonText)
+    if (!accepted) return this.snapshot()
     this.takeoverRequested = true
     this.reason = reasonText
     this.abort?.abort(new Error('转人工接管'))
@@ -195,6 +288,7 @@ export class ExplorerSession {
   async takeoverEnd(): Promise<SessionSnapshot> {
     // 用标志位而不是只调 watcher.stop()：结束请求可能早于录制器创建，
     // 那时 stop() 是空操作，会话就永远停在等待人工上
+    this.control('takeover-end', this.state === 'awaiting_human')
     this.takeoverEndRequested = true
     this.watcher?.stop()
     return this.snapshot()
@@ -247,7 +341,7 @@ export class ExplorerSession {
           continue
         }
         const budgetStop = this.checkBudget()
-        if (budgetStop) return this.toPaused(budgetStop)
+        if (budgetStop) return this.toPausedByBudget(budgetStop)
 
         /* ---------- 观察 ---------- */
         this.setState('observing')
@@ -586,15 +680,22 @@ export class ExplorerSession {
     const store = this.store!
     this.takeoverRequested = false
     this.takeoverEndRequested = false
+    const reasonSource = this.reason
+    this.takeoverAt = Date.now()
+    this.takeoverSeq += 1
+    const seq = this.takeoverSeq
     this.setState('awaiting_human', this.reason)
     await this.deps.driver.clearUserInput()
 
     this.watcher = new WatchRecorder(this.deps.driver, store, {
       lane: MANUAL_LANE_ID,
       laneTitle: MANUAL_LANE_TITLE,
-      maxScreens: Math.max(1, this.budgets.maxScreens - this.screens),
+      // 剩余额度按本轮起算点算，否则二次探索时这里会算成负数并被夹到 1
+      maxScreens: Math.max(1, this.budgets.maxScreens - (this.screens - this.base.screens)),
       onPatch: (patch) => this.deps.emitPatch(patch),
       capture: () => this.deps.captureArchival(),
+      // 控件事件与会话记录要能对上：哪一轮、第几次接管
+      meta: { runId: this.runId, takeoverSeq: seq },
     })
 
     const stopWatch = () => this.takeoverEndRequested || this.stopRequested
@@ -603,6 +704,24 @@ export class ExplorerSession {
 
     this.screens += result.nodes.length
     if (result.lastNodeId) this.currentNodeId = result.lastNodeId
+
+    /*
+     * 接管区间落盘。
+     *
+     * 三种退出路径过去产生的记录一模一样（都只有一条 resuming），
+     * 事后分不出是用户点了结束、被整体停止，还是录制器自己抓满了额度——
+     * 而最后那种恰恰意味着用户还在操作、系统单方面停了录制。
+     */
+    this.record({
+      kind: 'takeover',
+      seq,
+      startedAt: this.takeoverAt,
+      endedAt: Date.now(),
+      endedBy: this.stopRequested ? 'stop' : this.takeoverEndRequested ? 'user' : 'max-screens',
+      reasonSource,
+      nodesAdded: result.nodes.length,
+    })
+    this.takeoverAt = 0
 
     // 把人工完成的事情告诉 AI，让它接着往下走
     const done = result.nodes.map((n) => n.note).filter(Boolean).join('；')
@@ -636,13 +755,45 @@ export class ExplorerSession {
     if (this.forbidden.length > 6) this.forbidden.shift()
   }
 
-  private checkBudget(): string | null {
-    if (this.step >= this.budgets.maxSteps) return `已达步数上限（${this.budgets.maxSteps} 步）`
-    if (this.aiCalls >= this.budgets.maxAiCalls) return `已达 AI 调用上限（${this.budgets.maxAiCalls} 次）`
-    if (this.screens >= this.budgets.maxScreens) return `已达截图数上限（${this.budgets.maxScreens} 张）`
-    if (this.startedAt && Date.now() - new Date(this.startedAt).getTime() > this.budgets.maxDurationMs)
-      return '已达时长上限'
+  /**
+   * 预算检查。
+   *
+   * 四项是短路顺序，同时触顶只会报第一项——所以触顶记录里要把四项的用量
+   * 全带上，否则事后只知道「步数到了」，不知道其余三项当时离上限还有多远。
+   * 时长那一项过去连阈值都不报，现在统一写成「用量／上限」。
+   */
+  private checkBudget(): { which: BudgetKey; used: number; limit: number; text: string } | null {
+    const u = this.used()
+    const b = this.budgets
+    if (u.step >= b.maxSteps)
+      return { which: 'steps', used: u.step, limit: b.maxSteps, text: `已达步数上限（${b.maxSteps} 步）` }
+    if (u.aiCalls >= b.maxAiCalls)
+      return { which: 'aiCalls', used: u.aiCalls, limit: b.maxAiCalls, text: `已达 AI 调用上限（${b.maxAiCalls} 次）` }
+    if (u.screens >= b.maxScreens)
+      return { which: 'screens', used: u.screens, limit: b.maxScreens, text: `已达截图数上限（${b.maxScreens} 张）` }
+    if (u.ms > b.maxDurationMs)
+      return {
+        which: 'duration',
+        used: u.ms,
+        limit: b.maxDurationMs,
+        text: `已达时长上限（${Math.round(b.maxDurationMs / 60000)} 分钟）`,
+      }
     return null
+  }
+
+  /** 预算触顶。四项用量一并落盘，事后才判定得了是哪一项、离上限多远 */
+  private toPausedByBudget(stop: { which: BudgetKey; used: number; limit: number; text: string }): void {
+    const u = this.used()
+    this.record({
+      kind: 'budget-stop',
+      which: stop.which,
+      value: stop.used,
+      limit: stop.limit,
+      used: u,
+      budgets: this.budgets,
+      elapsedMs: this.elapsedMs(),
+    })
+    this.toPaused(stop.text)
   }
 
   private fail(msg: string): void {
@@ -760,13 +911,44 @@ export class ExplorerSession {
     const from = this.state
     this.state = next
     if (reason) this.reason = reason
-    this.store?.appendSession({ kind: 'state', from, to: next, reason, step: this.step })
+    /*
+     * 时长只在运行区段里走表。
+     *
+     * 挂在状态机上而不是散在各处：暂停、人工接管、收尾、结束都要正确开合，
+     * 逐处去加迟早漏一个，而漏掉的那一个就是「明明没在跑，时长却在涨」。
+     */
+    const wasRunning = RUNNING_STATES.includes(from)
+    const nowRunning = RUNNING_STATES.includes(next)
+    if (wasRunning && !nowRunning && this.segmentAt) {
+      this.runMsBefore += Date.now() - this.segmentAt
+      this.segmentAt = 0
+    } else if (!wasRunning && nowRunning) {
+      this.segmentAt = Date.now()
+    }
+    this.record({ kind: 'state', from, to: next, reason, step: this.step })
     this.emit({ kind: 'state-changed', from, to: next, reason })
   }
 
   private log(level: 'info' | 'warn' | 'error', message: string): void {
-    this.store?.appendSession({ kind: 'log', level, message, step: this.step })
+    this.record({ kind: 'log', level, message, step: this.step })
     this.emit({ kind: 'log', level, message })
+  }
+
+  /**
+   * 控制指令审计。
+   *
+   * 被忽略的调用同样要记：用户点「继续」而会话不在暂停态、或者应用重启后
+   * 会话已经不存在，这两种情况过去零痕迹。而「点了继续但什么都没发生」
+   * 恰恰是需要事后区分的——是指令没被接受，还是接受了又立刻停下。
+   */
+  private control(op: ControlOp, accepted: boolean, note?: string): void {
+    this.record({ kind: 'control', op, accepted, stateBefore: this.state, note })
+    log.info('session', `控制指令 ${op}${accepted ? '' : '（被忽略）'} · 当前状态 ${this.state}`)
+  }
+
+  /** 所有落盘记录的唯一出口：统一带上运行标识，多轮记录才切得开 */
+  private record(entry: Record<string, unknown>): void {
+    this.store?.appendSession({ runId: this.runId, ...entry })
   }
 
   private emit(event: SessionEvent): void {
