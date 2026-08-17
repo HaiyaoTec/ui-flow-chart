@@ -40,6 +40,7 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
   // 收起状态记在本地，下次进来还是上次的选择
   const [logOpen, setLogOpen] = useState(() => localStorage.getItem('ufc.logOpen') !== '0')
   const [dragging, setDragging] = useState(false)
+  const [appVer, setAppVer] = useState('')
   // 用户自己调过分栏后就不再自动改，避免跟人抢方向盘
   const widthPinned = useRef(false)
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -50,6 +51,12 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
   }, [logs.length, logOpen])
 
   useEffect(() => localStorage.setItem('ufc.logOpen', logOpen ? '1' : '0'), [logOpen])
+
+  useEffect(() => {
+    void invoke(CH.appInfo)
+      .then((i) => setAppVer(`v${i.version}`))
+      .catch(() => undefined)
+  }, [])
 
   // 提示里要能报出「是哪个项目占着预览」，光有 id 说不清
   useEffect(() => {
@@ -251,6 +258,9 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
             <button className="ws-log-head" onClick={() => setLogOpen((v) => !v)} title={logOpen ? '收起日志' : '展开日志'}>
               <Icon name={logOpen ? 'caretDown' : 'caretUp'} size={14} />
               <span>探索日志</span>
+              {/* 版本号钉在日志面板上：用户报障时截的多半就是这一块，
+                  截图里带上版本，省掉「你装的哪个版本」这一轮往返 */}
+              <span className="ws-log-ver mono">{appVer}</span>
               <span className="muted">{logs.length}</span>
             </button>
             {logOpen && (

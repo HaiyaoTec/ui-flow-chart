@@ -19,6 +19,8 @@ import {
   listProjects,
   partitionOf,
 } from '../store/projects'
+import { appInfo } from '../appInfo'
+import { log, stripPaths } from '../log'
 import { getSettings, setSettings } from '../store/settings'
 import { updater } from '../updater'
 import { applyViewBackground, getUiView, themeBackground } from '../window'
@@ -134,6 +136,12 @@ export function registerIpc(getWindow: () => BaseWindow | null): void {
   handle(CH.previewProbe, () => preview.driver.probe())
   handle(CH.previewDiagnose, () => preview.diagnose())
   handle(CH.previewFreezeReady, ({ token }) => preview.noteFreezePainted(token))
+  handle(CH.appInfo, () => appInfo())
+  handle(CH.diagnoseClientError, ({ source, message, stack, componentStack }) => {
+    // 堆栈里的本机绝对路径含用户名，落盘前先抹掉
+    const detail = [stack, componentStack].filter((s): s is string => Boolean(s)).map(stripPaths).join('\n')
+    log.error('renderer', [`${source}：${message}`, detail].filter(Boolean).join('\n'))
+  })
 
   /**
    * 界面与预览的层级切换。
@@ -213,6 +221,8 @@ function registerTestHooks(getWindow: () => BaseWindow | null): void {
   ipcMain.handle('test:wait-stable', async () => preview.driver.waitStable())
   ipcMain.handle('test:graph', async (_e, projectId: string) => loadGraph(projectId))
   ipcMain.handle('test:preview-debug', async () => preview.debugInfo())
+  /** 主进程日志文件的末尾。用来验证异常真的落了盘，而不是只在控制台闪了一下 */
+  ipcMain.handle('test:log-tail', async () => ({ file: log.file(), text: log.tail(64 * 1024) }))
   /** 走一次带静帧的存档抓图，验证「贴静帧 → 收回执 → 抬界面 → 抓图 → 复位」这条链 */
   ipcMain.handle('test:capture-archival', async () => {
     const shot = await preview.captureArchival()

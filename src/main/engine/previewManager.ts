@@ -3,6 +3,7 @@ import { CH, type Bounds, type NavState, type PreviewDiagnosis } from '@shared/i
 import { DEFAULT_DEVICE_ID, getDevice } from '@shared/devices'
 import type { DeviceSpec } from '@shared/types'
 import { computeFitScale, PageDriver, type Screenshot } from './PageDriver'
+import { log } from '../log'
 import { getUiContents, getUiView } from '../window'
 
 /**
@@ -162,7 +163,7 @@ export class PreviewManager {
         onNav: () => this.emitNav(),
         // 跨进程导航可能换掉渲染帧，覆盖要整套重放，不能只挪视图
         onNavigated: () => void this.syncViewport(true),
-        onCrash: () => this.handleCrash(),
+        onCrash: (detail) => this.handleCrash(detail),
       })
       trace('spin up renderer')
       await this.driver.ensureRenderer()
@@ -614,14 +615,23 @@ export class PreviewManager {
     getUiContents()?.send(CH.evPreviewNav, state)
   }
 
-  private handleCrash(): void {
+  private handleCrash(detail = ''): void {
+    // 崩溃本身必须留痕。早先这里是静默自愈：用户只看到预览闪了一下、
+    // 探索莫名其妙走偏，而磁盘上、日志面板里都查不到任何痕迹
+    log.error('preview', `预览页渲染进程退出（${detail}），正在重建：${this.lastUrl || 'about:blank'}`)
+    getUiContents()?.send(CH.evSession, {
+      kind: 'log',
+      level: 'warn',
+      message: `预览页崩溃（${detail}），已自动重建`,
+    })
     // 渲染进程崩溃后重建 view、重放 override、回到崩溃前的地址
     void (async () => {
       try {
         if (!this.win) return
         await this.open(this.lastUrl || 'about:blank', this.device, this.partition)
-      } catch {
-        /* 重建失败时保持静默，由会话状态机报错 */
+        log.info('preview', '预览页重建完成')
+      } catch (e) {
+        log.error('preview', '预览页重建失败', e)
       }
     })()
   }

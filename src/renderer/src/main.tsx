@@ -1,8 +1,30 @@
 import React from 'react'
 import { createRoot } from 'react-dom/client'
+import { CH } from '@shared/ipc-contract'
 import App from './App'
 import { DialogProvider } from './components/Dialog'
+import ErrorBoundary from './components/ErrorBoundary'
+import { invoke } from './ipc'
 import './theme.css'
+
+/*
+ * 界面侧的兜底捕获。
+ *
+ * ErrorBoundary 只接得住 React 渲染期间的错误；事件回调、定时器、
+ * 以及所有 void 出去的 Promise 都绕过它。这两条挂在全局，
+ * 把剩下的都回传主进程落盘——否则界面上只是某个按钮点了没反应，
+ * 事后无从查起。
+ */
+const report = (source: string, message: string, stack?: string): void => {
+  void invoke(CH.diagnoseClientError, { source, message, stack }).catch(() => undefined)
+}
+window.addEventListener('error', (e) => {
+  report('界面未捕获错误', e.message || String(e.error), e.error instanceof Error ? e.error.stack : undefined)
+})
+window.addEventListener('unhandledrejection', (e) => {
+  const r = e.reason
+  report('界面未处理的 Promise 拒绝', r instanceof Error ? r.message : String(r), r instanceof Error ? r.stack : undefined)
+})
 
 // 平台标在根元素上：滚动条这类外观必须按平台分叉，而 CSS 里问不到平台。
 // 要在首屏之前写好，否则会先按默认样式画一帧
@@ -26,8 +48,10 @@ window.addEventListener('keydown', markKeyboard)
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <DialogProvider>
-      <App />
-    </DialogProvider>
+    <ErrorBoundary>
+      <DialogProvider>
+        <App />
+      </DialogProvider>
+    </ErrorBoundary>
   </React.StrictMode>
 )

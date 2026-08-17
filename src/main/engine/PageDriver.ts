@@ -57,7 +57,7 @@ export class PageDriver implements IPageDriver {
   private shownAt: { bounds: Bounds; scale: number } | null = null
   private onNav?: (url: string, loading: boolean) => void
   private onNavigated?: () => void
-  private onCrash?: () => void
+  private onCrash?: (detail: string) => void
 
   get attached(): boolean {
     return this.rawView !== null
@@ -124,7 +124,9 @@ export class PageDriver implements IPageDriver {
     // 跨进程导航会换掉 RenderFrameHost，Emulation 覆盖有可能不跟过去。
     // 每次主框架提交后重放一遍，成本很低但能免掉「设备模拟突然失效」。
     wc.on('did-navigate', () => this.onNavigated?.())
-    wc.on('render-process-gone', () => this.onCrash?.())
+    // 细节必须带出去：reason 区分的是崩溃、被杀、内存耗尽还是主动退出，
+    // 丢掉它事后只知道"预览崩过一次"，判断不了是站点太重还是驱动有问题
+    wc.on('render-process-gone', (_e, d) => this.onCrash?.(`reason=${d.reason} exitCode=${d.exitCode}`))
 
     // 铁律：先 attach 并铺好全部 override，再导航目标站。
     // 顺序反了会拿到桌面布局塞进手机视口的错误结果。
@@ -175,7 +177,7 @@ export class PageDriver implements IPageDriver {
   setCallbacks(cb: {
     onNav?: (url: string, loading: boolean) => void
     onNavigated?: () => void
-    onCrash?: () => void
+    onCrash?: (detail: string) => void
   }): void {
     this.onNav = cb.onNav
     this.onNavigated = cb.onNavigated

@@ -1,0 +1,51 @@
+/* 界面崩溃后的兜底页。铺满整个界面视图——此时组件树已经卸载，
+   底下没有任何东西可露，纯色空白正是要避免的那个观感 */
+.crash {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bg);
+  color: var(--fg);
+}
+.crash-box {
+  max-width: 520px;
+  padding: 24px 26px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.crash-box h1 {
+  margin: 0 0 10px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.crash-box p {
+  margin: 0 0 14px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+/* 错误原文要能被选中复制：诊断包导不出来时，这是用户唯一能给的信息 */
+.crash-detail {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  max-height: 140px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  user-select: text;
+}
+.crash-acts {
+  display: flex;
+  gap: 8px;
+}

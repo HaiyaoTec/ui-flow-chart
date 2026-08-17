@@ -45,6 +45,10 @@ export const CH = {
   previewDiagnose: 'preview:diagnose',
   /** 静帧已经贴到屏幕区上了。主进程等到这一声再把界面提上来，否则会先露出底板 */
   previewFreezeReady: 'preview:freeze-ready',
+  /** 界面侧的未捕获错误。界面白屏时主进程照常在跑，不回报就一点痕迹都没有 */
+  diagnoseClientError: 'diagnose:client-error',
+  /** 应用版本与运行环境。用户报障时第一件要问的就是版本，界面上得能看见 */
+  appInfo: 'app:info',
   uiStack: 'ui:stack',
 
   updateCheck: 'update:check',
@@ -108,6 +112,16 @@ export interface NavState {
 export interface ExportResult {
   path: string
   bytes: number
+}
+
+/** 应用版本与运行环境 */
+export interface AppInfo {
+  version: string
+  platform: string
+  arch: string
+  electron: string
+  chrome: string
+  os: string
 }
 
 /** 设备模拟是否真的落到了页面上。数字直接摆出来，省得靠猜 */
@@ -174,6 +188,11 @@ export interface IpcInvokeMap {
   [CH.previewProbe]: { req: void; res: unknown }
   [CH.previewDiagnose]: { req: void; res: PreviewDiagnosis }
   [CH.previewFreezeReady]: { req: { token: number }; res: void }
+  [CH.appInfo]: { req: void; res: AppInfo }
+  [CH.diagnoseClientError]: {
+    req: { source: string; message: string; stack?: string; componentStack?: string }
+    res: void
+  }
   /**
    * 界面与预览的层级切换。
    *

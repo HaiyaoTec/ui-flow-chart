@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { BaseWindow, Menu, nativeTheme, shell, View, WebContentsView, type WebContents } from 'electron'
+import { log } from './log'
 import { getSettings } from './store/settings'
 
 /**
@@ -106,6 +107,20 @@ export function createMainWindow(): BaseWindow {
   win.on('leave-full-screen', () => fit())
 
   view.webContents.once('did-finish-load', () => win.show())
+
+  /*
+   * 界面视图自己的崩溃与卡死。
+   *
+   * 这两条以前完全没接：界面渲染进程挂掉时窗口还在、探索还在后台跑，
+   * 用户看到的是一块不动的画面，而磁盘上没有任何记录。
+   * 崩溃这里只留痕不自动重载——重载会把用户正在填的内容清掉，
+   * 界面上已有 ErrorBoundary 引导用户自己重载。
+   */
+  view.webContents.on('render-process-gone', (_e, d) => {
+    log.error('window', `界面渲染进程退出：reason=${d.reason} exitCode=${d.exitCode}`)
+  })
+  view.webContents.on('unresponsive', () => log.warn('window', '界面无响应'))
+  view.webContents.on('responsive', () => log.info('window', '界面恢复响应'))
 
   // 渲染进程里的外链走系统浏览器，不在应用内开窗
   view.webContents.setWindowOpenHandler(({ url }) => {

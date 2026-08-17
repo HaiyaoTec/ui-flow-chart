@@ -21,6 +21,7 @@ import { buildEdgeReviewTask, buildLaneClassifyTask } from '../ai/reviewPrompt'
 import { describeFinalize, finalizeGraph, type AiVerdict } from './finalize'
 import { inheritLanes, planCleanup } from './graphCleanup'
 import { GraphStore } from './graphStore'
+import { log } from '../log'
 import { delay, type PageDriver, type Screenshot } from './PageDriver'
 import { signatureHash } from './signature'
 import { WatchRecorder } from './watchRecorder'
@@ -150,7 +151,7 @@ export class ExplorerSession {
     this.fallbackStreak = 0
 
     this.setState('launching')
-    void this.loop()
+    void this.runLoop()
     return this.snapshot()
   }
 
@@ -170,7 +171,7 @@ export class ExplorerSession {
       this.pauseRequested = false
       this.reason = undefined
       this.setState('observing')
-      void this.loop()
+      void this.runLoop()
     }
     return this.snapshot()
   }
@@ -204,6 +205,28 @@ export class ExplorerSession {
   }
 
   /* --------------------------------- 主循环 -------------------------------- */
+
+  /**
+   * 主循环的唯一入口。
+   *
+   * loop() 自己有 try/catch，但 catch 块里还要写日志、发事件、做收尾，
+   * 这几步同样可能抛。真抛出来就是一个没人接的被拒 Promise：
+   * 会话停在原状态、界面上什么都不显示、磁盘上也没有记录。
+   * 这层兜底保证无论如何都留下痕迹，并把会话明确置为失败。
+   */
+  private async runLoop(): Promise<void> {
+    try {
+      await this.loop()
+    } catch (e) {
+      log.error('session', '探索主循环异常退出', e)
+      this.lastError = e instanceof Error ? e.message : String(e)
+      try {
+        this.setState('failed', '主循环异常退出')
+      } catch {
+        // 连状态都写不进去时，主日志里那条已经够定位了
+      }
+    }
+  }
 
   private async loop(): Promise<void> {
     const store = this.store

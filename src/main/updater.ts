@@ -2,6 +2,7 @@ import { app } from 'electron'
 import { CH, type UpdateState } from '@shared/ipc-contract'
 import { SESSION_HOLDS_PREVIEW } from '@shared/types'
 import { sessions } from './engine/sessionManager'
+import { updaterLogger } from './log'
 import { getSettings } from './store/settings'
 import { getUiContents } from './window'
 
@@ -81,6 +82,9 @@ class Updater {
       const mod = await import('electron-updater')
       const autoUpdater = (mod.default ?? mod).autoUpdater
       if (!autoUpdater) throw new Error('electron-updater 未能加载')
+      // 更新链路的内部日志默认走 console，打包版没有控制台等于全丢。
+      // 而"更新装不上"恰恰是这类分发方式最高频的报障，日志是唯一线索
+      autoUpdater.logger = updaterLogger
       autoUpdater.autoDownload = false // 先问过用户设置再下，避免占用带宽
       autoUpdater.autoInstallOnAppQuit = true
       return autoUpdater

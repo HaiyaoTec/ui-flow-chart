@@ -2,6 +2,7 @@ import { appendFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { assignLayout, relayoutAll, UNPLACED } from '@shared/canvas-core/autoLayout'
 import type { FlowEdge, FlowGraph, FlowLane, FlowNode, GraphPatch, NodeKind, ProbeResult } from '@shared/types'
+import { log } from '../log'
 import { projectDir, readJson, writeJsonAtomic } from '../store/paths'
 
 const emptyGraph = (targetUrl: string, deviceId: string): FlowGraph => ({
@@ -187,19 +188,31 @@ export class GraphStore {
     writeJsonAtomic(join(this.dir, 'graph.json'), this.graph)
   }
 
+  /**
+   * 追加落盘，写失败一律吞掉。
+   *
+   * 这里绝不能抛：调用方 appendSession 就挂在探索主循环的日志路径上，
+   * 而主循环的 catch 块里还会再写一次日志。磁盘满或目录只读时，
+   * 异常会在 catch 块内二次抛出 → loop() 返回被拒绝的 Promise →
+   * 调用方是 void 调用、没有兜底 → 探索静默停住，磁盘上一行记录都没有。
+   */
+  private appendSafe(file: string, text: string): void {
+    try {
+      appendFileSync(join(this.dir, file), text, 'utf8')
+    } catch (e) {
+      log.error('graphStore', `写入 ${file} 失败`, e)
+    }
+  }
+
   /** 每步事件追加落盘，供审计与崩溃后重放 */
   appendSession(entry: Record<string, unknown>): void {
-    appendFileSync(join(this.dir, 'session.jsonl'), JSON.stringify({ t: Date.now(), ...entry }) + '\n', 'utf8')
+    this.appendSafe('session.jsonl', JSON.stringify({ t: Date.now(), ...entry }) + '\n')
   }
 
   /** 人工接管期的控件事件。只记控件标识，不含任何输入值 */
   appendEvents(entries: object[]): void {
     if (!entries.length) return
-    appendFileSync(
-      join(this.dir, 'events.jsonl'),
-      entries.map((e) => JSON.stringify(e)).join('\n') + '\n',
-      'utf8'
-    )
+    this.appendSafe('events.jsonl', entries.map((e) => JSON.stringify(e)).join('\n') + '\n')
   }
 
   patchOf(lanes: FlowLane[], nodes: FlowNode[], edges: FlowEdge[]): GraphPatch {
