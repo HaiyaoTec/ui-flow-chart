@@ -20,7 +20,10 @@ vi.mock('../../src/main/window', () => ({
   getUiView: () => uiView,
 }))
 
-const { PreviewManager } = await import('../../src/main/engine/previewManager')
+const { PreviewHost } = await import('../../src/main/engine/previewManager')
+
+/** 抓图要指名道姓是哪个项目：宿主同时持有多个会话 */
+const PROJECT = 'p1'
 
 /** 记录层级变化：谁被挂到最后就是谁在最上层 */
 function makeWin(order: string[]): unknown {
@@ -38,14 +41,15 @@ function makeWin(order: string[]): unknown {
 type Hooks = { onCapture?: () => void; frame?: string }
 
 function setup(hooks: Hooks = {}): {
-  pm: InstanceType<typeof PreviewManager>
+  pm: InstanceType<typeof PreviewHost>
   order: string[]
   ack: () => Promise<void>
 } {
   const order: string[] = []
   sent.length = 0
-  const pm = new PreviewManager()
+  const pm = new PreviewHost()
   pm.bindWindow(makeWin(order) as never)
+  const session = pm.ensure(PROJECT)
   const driver = {
     id: 'preview',
     view: { id: 'preview' },
@@ -57,7 +61,7 @@ function setup(hooks: Hooks = {}): {
       return { png: Buffer.alloc(0), jpegBase64: 'shot' }
     },
   }
-  ;(pm as unknown as { driver: unknown }).driver = driver
+  ;(session as unknown as { driver: unknown }).driver = driver
   // 渲染进程的回执：等静帧真的发出来，再按主进程给的令牌回报
   const ack = async (): Promise<void> => {
     for (let i = 0; i < 50 && !sent.length; i += 1) await new Promise((r) => setTimeout(r, 5))
@@ -71,10 +75,10 @@ describe('抓存档图期间的静帧', () => {
   it('先贴静帧再抬界面，抓完放回预览并撤掉静帧', async () => {
     const steps: string[] = []
     const { pm, order, ack } = setup({ onCapture: () => steps.push('screenshot') })
-    const p = pm.captureArchival()
+    const p = pm.captureArchival(PROJECT)
+    // 抓图走的是全局串行队列，静帧要等排到自己才发出去
+    for (let i = 0; i < 50 && !sent.length; i += 1) await new Promise((r) => setTimeout(r, 5))
     // 回执之前不许抬界面，否则露出的是界面自己的屏幕底板
-    await Promise.resolve()
-    await Promise.resolve()
     expect(order).toEqual([])
     expect(sent[0].channel).toBe(CH.evPreviewFreeze)
     expect((sent[0].payload as { image: string }).image).toMatch(/^data:image\/jpeg;base64,/)
@@ -91,16 +95,16 @@ describe('抓存档图期间的静帧', () => {
 
   it('渲染进程不回执时按超时继续，不把抓图卡住', async () => {
     const { pm, order } = setup()
-    const shot = await pm.captureArchival()
+    const shot = await pm.captureArchival(PROJECT)
     expect(shot.jpegBase64).toBe('shot')
     expect(order).toEqual(['ui', 'preview'])
   })
 
   it('抓图途中有弹层抬起界面时，收尾不把预览放回去盖住它', async () => {
-    let pm!: InstanceType<typeof PreviewManager>
+    let pm!: InstanceType<typeof PreviewHost>
     const ctx = setup({ onCapture: () => pm.setStackFront('ui') })
     pm = ctx.pm
-    const p = ctx.pm.captureArchival()
+    const p = ctx.pm.captureArchival(PROJECT)
     await ctx.ack()
     await p
     // 自己抬的那次 + 弹层抬的那次，没有把预览放回去的动作
@@ -109,8 +113,8 @@ describe('抓存档图期间的静帧', () => {
 
   it('视图不可见时不做静帧，直接抓图', async () => {
     const { pm, order } = setup()
-    ;(pm as unknown as { driver: { isVisible: () => boolean } }).driver.isVisible = () => false
-    await pm.captureArchival()
+    ;(pm.ensure(PROJECT) as unknown as { driver: { isVisible: () => boolean } }).driver.isVisible = () => false
+    await pm.captureArchival(PROJECT)
     expect(sent).toEqual([])
     expect(order).toEqual([])
   })

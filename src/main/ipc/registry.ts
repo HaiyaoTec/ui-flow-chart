@@ -107,7 +107,7 @@ export function registerIpc(getWindow: () => BaseWindow | null): void {
     const heldByOther = Boolean(busy.projectId) && busy.projectId !== id && SESSION_HOLDS_PREVIEW.includes(busy.state)
     if (!heldByOther) {
       void preview
-        .open(meta.targetUrl, getDevice(meta.deviceId, meta.customDevice), partitionOf(meta.id))
+        .open(meta.id, meta.targetUrl, getDevice(meta.deviceId, meta.customDevice), partitionOf(meta.id))
         .catch(() => undefined)
     }
 
@@ -246,7 +246,7 @@ function registerTestHooks(getWindow: () => BaseWindow | null): void {
   ipcMain.handle('test:log-tail', async () => ({ file: log.file(), text: log.tail(64 * 1024) }))
   /** 走一次带静帧的存档抓图，验证「贴静帧 → 收回执 → 抬界面 → 抓图 → 复位」这条链 */
   ipcMain.handle('test:capture-archival', async () => {
-    const shot = await preview.captureArchival()
+    const shot = await preview.captureArchival(preview.frontProjectId())
     return { pngBytes: shot.png.length, freeze: preview.lastFreezeInfo() }
   })
   /** 界面视图有没有铺满内容区——铺不满就会在边缘露出底色，看着像黑边 */

@@ -20,7 +20,7 @@ export async function runSelfCheck(win: BaseWindow, baseUrl: string): Promise<vo
     await preview.setPaneBounds({ x: 20, y: 60, width: 380, height: 760 })
 
     /* 1. 移动端设备模拟 */
-    await preview.open(`${baseUrl}/ua-echo.html`, getDevice('iphone-14-pro-max'), 'persist:selfcheck')
+    await preview.open('selfcheck', `${baseUrl}/ua-echo.html`, getDevice('iphone-14-pro-max'), 'persist:selfcheck')
     await delay(1200)
     out.mobile = await preview.driver.evalInPage('window.__deviceInfo')
 

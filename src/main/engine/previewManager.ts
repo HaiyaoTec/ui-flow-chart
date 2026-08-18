@@ -24,7 +24,7 @@ const CAPTURE_MAX_MS = 3000
  */
 const HOLD_OPEN_MAX_MS = 20000
 
-export class PreviewManager {
+export class SessionPreview {
   readonly driver = new PageDriver()
   private win: BaseWindow | null = null
   private device: DeviceSpec = getDevice(DEFAULT_DEVICE_ID)
@@ -69,19 +69,16 @@ export class PreviewManager {
   private openGen = 0
   /** 视口同步的串行队列 */
   private applyChain: Promise<void> = Promise.resolve()
+  /**
+   * 是否在后台跑。
+   *
+   * 后台会话的页面照常加载、照常被操作、照常抓得到图（隐藏不影响出帧），
+   * 只是不占屏幕。所有「放出来」的路径都要看这个标志，
+   * 否则某个后台会话的一次矩形上报就会把它画到前台会话的位置上。
+   */
+  private background = false
   /** 解绑当前窗口 resize 监听的函数 */
   private offResize: (() => void) | null = null
-  /** 界面视图当前是否在预览之上。抓存档图时要临时提上来，收尾要还原 */
-  private uiFront = false
-  /** 层级变更的代次。抓图收尾只在没人动过层级时才把预览放回上层 */
-  private stackGen = 0
-  /** 静帧的代次令牌，配合渲染进程的回执使用 */
-  private freezeGen = 0
-  /** 当前静帧的等待者：渲染进程报告贴好了就兑现 */
-  private freezeAck: { token: number; resolve: () => void } | null = null
-  /** 最近一次静帧的结果，供自动化验证读取 */
-  private freezeInfo: { used: boolean; acked: boolean; ms: number } = { used: false, acked: false, ms: 0 }
-
   /**
    * 绑定主窗口。
    *
@@ -113,29 +110,31 @@ export class PreviewManager {
     return this.device
   }
 
+  /** 转入后台：藏起来，页面继续跑 */
+  hideForBackground(): void {
+    this.background = true
+    this.driver.setVisible(false)
+  }
+
   /**
-   * 界面与预览的层级切换。
+   * 转到前台。
    *
-   * 界面自己也是窗口的子视图（见 window.ts），谁在上完全由排序决定。
-   * 自绘弹层要盖住网页时，把界面提到最上层就行——纯排序，瞬时生效，
-   * 不必隐藏预览、也不必抓帧顶替，切换缩放这类操作不会再被拖慢。
-   * 代价是界面在上时鼠标事件归界面，所以弹层一关就要把预览放回上层。
+   * 只重新落位再显示，绝不重开页面——重开等于把登录态与滚动位置一起丢掉，
+   * 而后台会话很可能正停在登录之后的深层页面上。
    */
-  setStackFront(front: 'ui' | 'preview'): void {
-    const win = this.win
-    this.uiFront = front === 'ui'
-    this.stackGen += 1
-    if (!win || win.isDestroyed()) return
-    const top = front === 'ui' ? getUiView() : this.driver.view
-    if (!top) return
-    // 必须先摘再挂：对已经是子视图的 view 直接 addChildView 不保证重排，
-    // 那样界面根本升不到最上层，网页照旧压着弹层
-    try {
-      win.contentView.removeChildView(top)
-    } catch {
-      /* 不是子视图就直接挂 */
-    }
-    win.contentView.addChildView(top)
+  async showForForeground(): Promise<void> {
+    this.background = false
+    if (!this.driver.attached) return
+    this.holdUntilPane()
+    await this.syncViewport(true)
+    this.releasePane()
+  }
+
+  /** 释放本会话的视图 */
+  destroy(): void {
+    this.offResize?.()
+    this.offResize = null
+    this.driver.destroy()
   }
 
   /** 打开目标站。每次都重建 view 并在导航前铺好 override */
@@ -323,7 +322,7 @@ export class PreviewManager {
       clearTimeout(this.awaitTimer)
       this.awaitTimer = null
     }
-    this.driver.setVisible(this.wantVisible)
+    this.driver.setVisible(this.wantVisible && !this.background)
   }
 
   /** 当前应当使用的缩放：渲染进程指定优先，否则按可用空间自适应 */
@@ -389,88 +388,14 @@ export class PreviewManager {
       return { image }
     }
     // 等待新矩形期间只记意愿，不真的显示——否则又会在旧位置画一帧
-    this.driver.setVisible(visible && !this.awaitingPane)
+    this.driver.setVisible(visible && !this.awaitingPane && !this.background)
     return { image }
   }
 
-  /**
-   * 抓一张存档图，期间用静帧顶住屏幕区。
-   *
-   * 存档图要设备原始分辨率（clip.scale = 像素比），而预览是按自适应比例显示的；
-   * 两个倍率不一致时 Chromium 必须临时按请求的倍率重新光栅化整块合成面，抓完再还原，
-   * 这一去一回期间页面按另一个尺寸排了一次版——看上去就是每抓一次图闪一下。
-   *
-   * 所以先用 capturePage 取一帧当前画面（它拿的是合成器已有的帧，不触发重排），
-   * 把界面视图提到预览之上盖住屏幕区，再去抓存档图。原生视图并未隐藏，
-   * 仍在正常出帧，CDP 抓图不受影响。
-   */
-  async captureArchival(): Promise<Screenshot> {
+  /** 纯抓图。静帧顶替与层级由窗口级的 PreviewHost 统筹，见 captureArchival */
+  async capture(): Promise<Screenshot> {
     if (!this.driver.attached) throw new Error('预览视图尚未创建')
-    const ui = getUiContents()
-    this.freezeInfo = { used: false, acked: false, ms: 0 }
-    const frame = ui && this.driver.isVisible() ? await this.driver.capturePreviewFrame().catch(() => '') : ''
-    // 弹层已经把界面提上来时不插手，免得收尾把它按回去、弹层反被网页盖住
-    const raise = Boolean(frame) && !this.uiFront
-    if (frame) {
-      const token = ++this.freezeGen
-      const t0 = Date.now()
-      const painted = new Promise<boolean>((resolve) => {
-        this.freezeAck = { token, resolve: () => resolve(true) }
-        // 渲染进程没回执（正在重载、图片解码失败）也要继续，不能把抓图卡在这
-        setTimeout(() => resolve(false), FREEZE_ACK_MAX_MS)
-      })
-      ui?.send(CH.evPreviewFreeze, { image: `data:image/jpeg;base64,${frame}`, token })
-      // 必须等静帧真的画上去再提界面。抢在前面提的话，
-      // 那几帧露出来的是界面自己的屏幕底板，等于把闪烁换了个样子
-      const acked = await painted
-      this.freezeAck = null
-      this.freezeInfo = { used: true, acked, ms: Date.now() - t0 }
-      if (process.env.UFC_TRACE === '1') {
-        console.log(`[preview] 静帧${acked ? `已贴好（${Date.now() - t0}ms）` : '回执超时，照常抓图'}`)
-      }
-      if (raise) this.setStackFront('ui')
-    }
-    // 界面在上时鼠标事件归界面。抓图万一卡住，不能让预览一直点不动，
-    // 到点无条件放回去——那时最多闪一下，总好过操作台失灵
-    const gen = this.stackGen
-    const watchdog = raise ? setTimeout(() => this.restoreStack(gen), CAPTURE_MAX_MS) : null
-    try {
-      return await this.driver.screenshot()
-    } finally {
-      if (watchdog) clearTimeout(watchdog)
-      if (frame) {
-        if (raise) this.restoreStack(gen)
-        ui?.send(CH.evPreviewFreeze, { image: '', token: 0 })
-      }
-    }
-  }
-
-  /**
-   * 把预览放回上层，前提是这期间没人动过层级。
-   *
-   * 抓图途中可能有弹层把界面提上来，这时按原计划放回去会让网页盖住弹层，
-   * 所以以代次为准：不是自己那一次抬起来的就不管。
-   */
-  private restoreStack(gen: number): void {
-    if (this.stackGen !== gen) return
-    this.setStackFront('preview')
-  }
-
-  /** 当前谁在上。抓存档图与自动化验证都要读它 */
-  stackFront(): 'ui' | 'preview' {
-    return this.uiFront ? 'ui' : 'preview'
-  }
-
-  /** 最近一次抓存档图时静帧的表现 */
-  lastFreezeInfo(): { used: boolean; acked: boolean; ms: number } {
-    return this.freezeInfo
-  }
-
-  /** 渲染进程报告静帧已贴好。过期令牌一律忽略 */
-  noteFreezePainted(token: number): void {
-    if (this.freezeAck?.token !== token) return
-    this.freezeAck.resolve()
-    this.freezeAck = null
+    return this.driver.screenshot()
   }
 
   /**
@@ -577,10 +502,6 @@ export class PreviewManager {
     this.emitNav()
   }
 
-  destroy(): void {
-    this.driver.destroy()
-  }
-
   /**
    * 视口按缩放后的实际显示尺寸摆放。
    *
@@ -642,4 +563,298 @@ export class PreviewManager {
   }
 }
 
-export const preview = new PreviewManager()
+/**
+ * 窗口级的预览宿主。
+ *
+ * 探索会话可以有多个，屏幕只有一块。这一层持有的是「屏幕这一侧」的事实：
+ * 界面报上来的占位矩形与缩放、界面与网页谁在上、抓存档图时顶替用的静帧、
+ * 以及哪个会话正占着屏幕。会话那一侧（设备、分区、当前地址、视图闸门）
+ * 归 SessionPreview，一个会话一份。
+ *
+ * 两条不变量把复杂度压住了：
+ * 1. 同一时刻只有一个前台预览。层级因此不必表达 N 层顺序，
+ *    其余会话的视图恒隐藏、互相重叠也无害。
+ * 2. 一个项目至多一个会话。同一个分区上因此永远只有一个 PageDriver，
+ *    Session 级的请求头钩子不会被另一个实例替换掉。
+ */
+/**
+ * 「真机预览」页用的预览。
+ *
+ * 那个页面不绑任何项目，用户就是拿它当个手机浏览器用。给它一个保留标识，
+ * 与项目会话共用同一套前台仲裁——否则界面上会出现两个都想占屏幕的东西。
+ */
+const UI_PREVIEW_ID = '__ui-preview__'
+
+export class PreviewHost {
+  private win: BaseWindow | null = null
+  private sessions = new Map<string, SessionPreview>()
+  /** 当前占着屏幕的项目 */
+  private frontId = ''
+  /** 界面视图当前是否在预览之上 */
+  private uiFront = false
+  /** 层级变更的代次。抓图收尾只在没人动过层级时才把预览放回上层 */
+  private stackGen = 0
+  /** 静帧的代次令牌，配合渲染进程的回执使用 */
+  private freezeGen = 0
+  /** 当前静帧的等待者：渲染进程报告贴好了就兑现 */
+  private freezeAck: { token: number; resolve: () => void } | null = null
+  /** 最近一次静帧的结果，供自动化验证读取 */
+  private freezeInfo: { used: boolean; acked: boolean; ms: number } = { used: false, acked: false, ms: 0 }
+  /**
+   * 存档抓图的串行队列。
+   *
+   * 实测并发抓图有近十倍的惩罚（四张并发各 1.5 秒上下，串行各 0.15 秒上下）——
+   * 合成器那一侧本来就是串行的，挤进去只会互相等。
+   */
+  private captureChain: Promise<unknown> = Promise.resolve()
+
+  bindWindow(win: BaseWindow): void {
+    this.win = win
+    for (const s of this.sessions.values()) s.bindWindow(win)
+  }
+
+  unbindWindow(win: BaseWindow): void {
+    if (this.win !== win) return
+    for (const s of this.sessions.values()) s.unbindWindow(win)
+    this.sessions.clear()
+    this.frontId = ''
+    this.win = null
+  }
+
+  /** 取得（必要时创建）某个项目的预览。新建的会话默认不在前台 */
+  ensure(projectId: string): SessionPreview {
+    let s = this.sessions.get(projectId)
+    if (!s) {
+      s = new SessionPreview()
+      if (this.win) s.bindWindow(this.win)
+      this.sessions.set(projectId, s)
+      // 第一个进来的直接占屏幕，否则界面上会是一片空
+      if (!this.frontId) this.frontId = projectId
+    }
+    return s
+  }
+
+  /** 当前占着屏幕的那个会话 */
+  front(): SessionPreview | null {
+    return this.sessions.get(this.frontId) ?? null
+  }
+
+  /**
+   * 界面这一侧的调用兜底到「真机预览」那个会话。
+   *
+   * 界面上的占位矩形、可见性、地址栏这些永远是对着屏幕上那一块说的；
+   * 没有项目在前台时它们仍然有效，落到预览页自己的会话上。
+   */
+  private frontOrDefault(): SessionPreview {
+    const f = this.front()
+    if (f) return f
+    const s = this.ensure(UI_PREVIEW_ID)
+    if (!this.frontId) this.frontId = UI_PREVIEW_ID
+    return s
+  }
+
+  frontProjectId(): string {
+    return this.frontId
+  }
+
+  has(projectId: string): boolean {
+    return this.sessions.has(projectId)
+  }
+
+  /**
+   * 把某个项目切到前台。
+   *
+   * 只改可见性与绑定，绝不重新打开页面——重开等于把登录态与滚动位置一起丢掉，
+   * 而后台会话很可能正跑在登录之后的深层页面上。
+   */
+  async setFront(projectId: string): Promise<void> {
+    if (this.frontId === projectId) return
+    const prev = this.front()
+    this.frontId = projectId
+    // 先把上一个藏起来再放新的，避免两个视图同时可见、后挂的那个盖住前一个
+    prev?.hideForBackground()
+    await this.sessions.get(projectId)?.showForForeground()
+  }
+
+  /** 释放某个项目的预览。会话结束或项目被删时调用 */
+  release(projectId: string): void {
+    const s = this.sessions.get(projectId)
+    if (!s) return
+    s.destroy()
+    this.sessions.delete(projectId)
+    if (this.frontId === projectId) this.frontId = ''
+  }
+
+  /* ------------------------- 界面这一侧：只作用于前台 ------------------------- */
+
+  /**
+   * 界面与预览的层级切换。
+   *
+   * 界面自己也是窗口的子视图（见 window.ts），谁在上完全由排序决定。
+   * 自绘弹层要盖住网页时，把界面提到最上层就行——纯排序，瞬时生效。
+   * 代价是界面在上时鼠标事件归界面，所以弹层一关就要把预览放回上层。
+   * 只需操作前台会话的视图：其余会话恒隐藏，不参与层级。
+   */
+  setStackFront(front: 'ui' | 'preview'): void {
+    const win = this.win
+    this.uiFront = front === 'ui'
+    this.stackGen += 1
+    if (!win || win.isDestroyed()) return
+    const top = front === 'ui' ? getUiView() : this.front()?.driver.view
+    if (!top) return
+    // 必须先摘再挂：对已经是子视图的 view 直接 addChildView 不保证重排，
+    // 那样界面根本升不到最上层，网页照旧压着弹层
+    try {
+      win.contentView.removeChildView(top)
+    } catch {
+      /* 不是子视图就直接挂 */
+    }
+    win.contentView.addChildView(top)
+  }
+
+  stackFront(): 'ui' | 'preview' {
+    return this.uiFront ? 'ui' : 'preview'
+  }
+
+  lastFreezeInfo(): { used: boolean; acked: boolean; ms: number } {
+    return this.freezeInfo
+  }
+
+  /** 渲染进程报告静帧已贴好。过期令牌一律忽略 */
+  noteFreezePainted(token: number): void {
+    if (this.freezeAck?.token !== token) return
+    this.freezeAck.resolve()
+    this.freezeAck = null
+  }
+
+  /**
+   * 抓一张存档图。
+   *
+   * 前台会话额外做一件事：抓图期间用静帧顶住屏幕区。存档图要设备原始分辨率，
+   * 而预览是按自适应比例显示的，两个倍率不一致时 Chromium 得临时按请求的倍率
+   * 重新光栅化整块合成面、抓完再还原，这一去一回页面会按另一个尺寸排一次版——
+   * 看上去就是每抓一次图屏幕区跳一下。后台会话没人看着，直接抓即可。
+   *
+   * 所有会话共用一条串行队列，理由见 captureChain。
+   */
+  captureArchival(projectId: string): Promise<Screenshot> {
+    const run = async (): Promise<Screenshot> => {
+      const s = this.sessions.get(projectId)
+      if (!s) throw new Error('该项目没有预览视图')
+      if (this.frontId !== projectId) return s.capture()
+      return this.captureWithFreeze(s)
+    }
+    const next = this.captureChain.then(run, run)
+    // 队列本身不能因为某次抓图失败而断掉
+    this.captureChain = next.catch(() => undefined)
+    return next
+  }
+
+  private async captureWithFreeze(s: SessionPreview): Promise<Screenshot> {
+    const ui = getUiContents()
+    this.freezeInfo = { used: false, acked: false, ms: 0 }
+    const frame = ui && s.driver.isVisible() ? await s.driver.capturePreviewFrame().catch(() => '') : ''
+    // 弹层已经把界面提上来时不插手，免得收尾把它按回去、弹层反被网页盖住
+    const raise = Boolean(frame) && !this.uiFront
+    if (frame) {
+      const token = ++this.freezeGen
+      const t0 = Date.now()
+      const painted = new Promise<boolean>((resolve) => {
+        this.freezeAck = { token, resolve: () => resolve(true) }
+        // 渲染进程没回执（正在重载、图片解码失败）也要继续，不能把抓图卡在这
+        setTimeout(() => resolve(false), FREEZE_ACK_MAX_MS)
+      })
+      ui?.send(CH.evPreviewFreeze, { image: `data:image/jpeg;base64,${frame}`, token })
+      // 必须等静帧真的画上去再提界面。抢在前面提的话，
+      // 那几帧露出来的是界面自己的屏幕底板，等于把闪烁换了个样子
+      const acked = await painted
+      this.freezeAck = null
+      this.freezeInfo = { used: true, acked, ms: Date.now() - t0 }
+      if (raise) this.setStackFront('ui')
+    }
+    // 界面在上时鼠标事件归界面。抓图万一卡住，不能让预览一直点不动，
+    // 到点无条件放回去——那时最多闪一下，总好过操作台失灵
+    const gen = this.stackGen
+    const watchdog = raise ? setTimeout(() => this.restoreStack(gen), CAPTURE_MAX_MS) : null
+    try {
+      return await s.capture()
+    } finally {
+      if (watchdog) clearTimeout(watchdog)
+      if (frame) {
+        if (raise) this.restoreStack(gen)
+        ui?.send(CH.evPreviewFreeze, { image: '', token: 0 })
+      }
+    }
+  }
+
+  /**
+   * 把预览放回上层，前提是这期间没人动过层级。
+   *
+   * 抓图途中可能有弹层把界面提上来，这时按原计划放回去会让网页盖住弹层，
+   * 所以以代次为准：不是自己那一次抬起来的就不管。
+   */
+  private restoreStack(gen: number): void {
+    if (this.stackGen !== gen) return
+    this.setStackFront('preview')
+  }
+  /* --------------------------- 转给前台会话的接口 --------------------------- */
+
+  /**
+   * 前台会话的页面驱动。
+   *
+   * 保留这个属性是为了让界面侧的探针、自检这类「对着屏幕上那一个页面」的调用
+   * 不必层层传项目标识。探索会话自己不走这里——它拿的是自己那一份。
+   */
+  get driver(): PageDriver {
+    return this.frontOrDefault().driver
+  }
+
+  /** 打开某个项目的目标站，并把它切到前台 */
+  async open(projectId: string, url: string, device: DeviceSpec, partition: string): Promise<void> {
+    const s = this.ensure(projectId)
+    if (this.frontId !== projectId) {
+      this.front()?.hideForBackground()
+      this.frontId = projectId
+      s.hideForBackground()
+      s.showForForeground().catch(() => undefined)
+    }
+    await s.open(url, device, partition)
+  }
+
+  async setDevice(device: DeviceSpec): Promise<void> {
+    await this.frontOrDefault().setDevice(device)
+  }
+
+  async setPaneBounds(b: Bounds & { scale?: number }): Promise<void> {
+    await this.frontOrDefault().setPaneBounds(b)
+  }
+
+  async setVisible(visible: boolean, withSnapshot = false): Promise<{ image: string }> {
+    return this.frontOrDefault().setVisible(visible, withSnapshot)
+  }
+
+  async navigate(input: { url?: string; action?: 'back' | 'reload' }): Promise<void> {
+    await this.frontOrDefault().navigate(input)
+  }
+
+  async diagnose(): Promise<PreviewDiagnosis> {
+    return this.frontOrDefault().diagnose()
+  }
+
+  debugInfo(): ReturnType<SessionPreview['debugInfo']> {
+    return this.frontOrDefault().debugInfo()
+  }
+
+  async verifyAndHeal(): Promise<{ healed: boolean; scrollWidth: number; ua: string }> {
+    return this.frontOrDefault().verifyAndHeal()
+  }
+
+  /** 释放全部预览。窗口关闭与整体停止时调用 */
+  destroy(): void {
+    for (const s of this.sessions.values()) s.destroy()
+    this.sessions.clear()
+    this.frontId = ''
+  }
+}
+
+export const preview = new PreviewHost()

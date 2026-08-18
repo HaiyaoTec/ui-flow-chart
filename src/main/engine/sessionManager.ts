@@ -96,12 +96,12 @@ class SessionManager {
 
     const ai = createAiClient(meta.aiProfileId)
     this.session = new ExplorerSession({
-      driver: preview.driver,
+      driver: preview.ensure(meta.id).driver,
       ai,
       openTarget: async (url) => {
-        await preview.open(url, getDevice(meta.deviceId, meta.customDevice), partitionOf(meta.id))
+        await preview.open(meta.id, url, getDevice(meta.deviceId, meta.customDevice), partitionOf(meta.id))
       },
-      captureArchival: () => preview.captureArchival(),
+      captureArchival: () => preview.captureArchival(meta.id),
       emit: (event, snapshot) => {
         this.send(CH.evSession, { ...event, snapshot })
         if (event.kind === 'need-human') this.alertHuman(meta.name, event.reason)
