@@ -515,14 +515,33 @@ export class PageDriver implements IPageDriver {
         20000
       )) as { data: string }
       png = Buffer.from(res.data, 'base64')
-    } catch {
-      // 合成器偶尔出不了帧（导航中、窗口被遮挡等），退回 Electron 自带的抓图
-      const img = await this.rawView.webContents.capturePage()
+    } catch (e) {
+      /*
+       * 合成器偶尔出不了帧（导航中等），退回 Electron 自带的抓图。
+       *
+       * 注意这条兜底对**隐藏的视图无效**——capturePage 对隐藏视图必然失败，
+       * 而 CDP 那条路在隐藏时反而是好的。所以它只兜得住前台的偶发失败，
+       * 后台会话真出问题时这里拿到的是空图。
+       */
+      const img = await this.rawView.webContents.capturePage().catch(() => nativeImage.createEmpty())
       png = img.toPNG()
+      if (png.length === 0) {
+        throw new Error(`抓图失败：${e instanceof Error ? e.message : String(e)}`)
+      }
     }
 
+    /*
+     * 空图必须报错，不能往下传。
+     *
+     * 原先两条路都失败时返回的是空 Buffer：调用方的 try/catch 永远不触发，
+     * AI 拿着空图做决策，磁盘上还会留下 0 字节的 png——事后翻存档只看到一堆空文件，
+     * 完全看不出当时发生过什么。
+     */
+    if (png.length === 0) throw new Error('抓图失败：返回了空图')
+
     const img = nativeImage.createFromBuffer(png)
-    const thumb = img.isEmpty() ? img : img.resize({ width: SCREENSHOT_WIDTH_FOR_AI, quality: 'good' })
+    if (img.isEmpty()) throw new Error('抓图失败：图像无法解析')
+    const thumb = img.resize({ width: SCREENSHOT_WIDTH_FOR_AI, quality: 'good' })
     return { png, jpegBase64: thumb.toJPEG(80).toString('base64') }
   }
 

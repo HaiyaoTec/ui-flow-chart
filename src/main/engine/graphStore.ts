@@ -117,10 +117,15 @@ export class GraphStore {
     return edge
   }
 
-  /** 截图与缩略图落盘。缩略图在这一步就生成，导出时不必再压一次 */
+  /**
+   * 截图与缩略图落盘。缩略图在这一步就生成，导出时不必再压一次。
+   *
+   * 空内容一律不写：0 字节的 png 在画布与导出里都是一个坏掉的图，
+   * 而文件存在会让人以为「拍到了、只是内容不对」，比缺图更难查。
+   */
   saveShot(nodeId: string, png: Buffer, jpegBase64: string): void {
-    writeFileSync(join(this.dir, 'screens', `${nodeId}.png`), png)
-    writeFileSync(join(this.dir, 'screens', `${nodeId}.thumb.jpg`), Buffer.from(jpegBase64, 'base64'))
+    if (png.length) writeFileSync(join(this.dir, 'screens', `${nodeId}.png`), png)
+    if (jpegBase64) writeFileSync(join(this.dir, 'screens', `${nodeId}.thumb.jpg`), Buffer.from(jpegBase64, 'base64'))
   }
 
   updateMeta(patch: Partial<FlowGraph['meta']>): void {
