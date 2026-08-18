@@ -347,7 +347,7 @@ export interface AppSettings {
   defaultDeviceId: string
   defaultGoal: string
   exportDir?: string
-  /** 启动后与每 4 小时自动检查新版本 */
+  /** 启动后与每 30 分钟自动检查新版本 */
   autoCheckUpdate: boolean
   /** 发现新版本后自动在后台下载（不自动重启） */
   autoDownloadUpdate: boolean

@@ -1,13 +1,57 @@
 import { app } from 'electron'
 import { CH, type UpdateState } from '@shared/ipc-contract'
 import { sessions } from './engine/sessionManager'
-import { updaterLogger } from './log'
+import { log, updaterLogger } from './log'
 import { getSettings } from './store/settings'
 import { getUiContents } from './window'
 
 /** 冷启动后延迟一会儿再查，避开与首屏、预览初始化抢资源 */
 const FIRST_CHECK_DELAY = 30_000
-const CHECK_INTERVAL = 4 * 60 * 60 * 1000
+/**
+ * 自动检查的间隔。
+ *
+ * 检查本身很便宜：拉一次仓库的 Atom 订阅源加一份几百字节的 latest.yml，
+ * 都走 CDN，也不吃接口配额，所以这个值可以定得比较密。
+ * 真正要防的是「发现新版本 → 自动下载失败 → 下次检查再下一遍」——
+ * 那是个上百兆的包，见 downloadBackoff。
+ */
+const CHECK_INTERVAL = 30 * 60 * 1000
+
+/** 同一个版本下载失败后的首次退避 */
+const RETRY_BASE_MS = 10 * 60 * 1000
+/** 退避上限。退到这一档就相当于回到从前的检查节奏了 */
+const RETRY_MAX_MS = 4 * 60 * 60 * 1000
+
+/** 第 n 次失败之后要等多久再自动重试。10 分钟起步逐次翻倍，封顶 4 小时 */
+export function retryDelay(attempts: number): number {
+  const n = Math.max(1, attempts)
+  return Math.min(RETRY_BASE_MS * 2 ** (n - 1), RETRY_MAX_MS)
+}
+
+/** 某个版本的自动下载失败记录 */
+export interface DownloadFailure {
+  version: string
+  attempts: number
+  /** 早于这个时刻不再自动重试 */
+  nextAt: number
+}
+
+/**
+ * 现在能不能自动下载这个版本。
+ *
+ * 只约束自动路径：用户手动点「下载」是明确的意图，任何时候都放行。
+ * 换了版本就重新开始——新包与旧包失败与否没有关系。
+ */
+export function canAutoDownload(fail: DownloadFailure | null, version: string, now: number): boolean {
+  if (!fail || fail.version !== version) return true
+  return now >= fail.nextAt
+}
+
+/** 失败之后推进退避。同一个版本累加次数，换了版本从头算 */
+export function bumpFailure(fail: DownloadFailure | null, version: string, now: number): DownloadFailure {
+  const attempts = fail && fail.version === version ? fail.attempts + 1 : 1
+  return { version, attempts, nextAt: now + retryDelay(attempts) }
+}
 
 const RELEASE_PAGE = 'https://github.com/HaiyaoTec/ui-flow-chart/releases/latest'
 
@@ -41,6 +85,13 @@ class Updater {
   private started = false
   /** 更新模块加载失败：此时 api() 返回 null 的原因不是「开发模式」 */
   private loadFailed = false
+  /**
+   * 自动下载的失败退避。
+   *
+   * 下载失败后状态是 error，它拦不住下一次检查再触发一遍下载——
+   * 检查间隔一缩短，网不稳的用户就会被反复拉上百兆的包。
+   */
+  private downloadFailure: DownloadFailure | null = null
 
   current(): UpdateState {
     return {
@@ -109,6 +160,7 @@ class Updater {
         notes: typeof info.releaseNotes === 'string' ? info.releaseNotes : '',
         error: '',
       })
+      // 退避判定在 download() 里，这里不重复一遍——两处各判一次迟早会走岔
       if (!manualOnly() && getSettings().autoDownloadUpdate) void this.download()
     })
     up.on('update-not-available', () => this.emit({ phase: 'up-to-date', error: '' }))
@@ -141,15 +193,33 @@ class Updater {
     return this.current()
   }
 
-  async download(): Promise<UpdateState> {
+  /** manual=true 是用户明确点的，绕过失败退避 */
+  async download(manual = false): Promise<UpdateState> {
     // 未签名的 mac 包下载下来也装不上，界面上本就不给下载按钮，这里再兜一道
     if (manualOnly()) return this.current()
     const up = await this.api()
     if (!up || this.state.phase === 'downloading' || this.state.phase === 'downloaded') return this.current()
+    const version = this.state.version
+    /*
+     * 失败退避只拦自动下载。
+     *
+     * 下载失败后状态是 error，它拦不住下一次检查再触发一遍——检查间隔缩短之后，
+     * 网不稳的用户会被反复拉一个上百兆的包。用户手动点「下载」是明确的意图，
+     * 任何时候都放行。
+     */
+    if (!manual && !canAutoDownload(this.downloadFailure, version, Date.now())) {
+      log.info('updater', `${version} 的自动下载仍在退避中，跳过本次`)
+      return this.current()
+    }
     this.emit({ phase: 'downloading', percent: 0, error: '' })
     try {
       await up.downloadUpdate()
+      // 成功即清账，下一个版本从头开始
+      this.downloadFailure = null
     } catch (e) {
+      this.downloadFailure = bumpFailure(this.downloadFailure, version, Date.now())
+      const wait = Math.round(retryDelay(this.downloadFailure.attempts) / 60000)
+      log.warn('updater', `${version} 下载失败（第 ${this.downloadFailure.attempts} 次），${wait} 分钟内不再自动重试`)
       this.emit({ phase: 'error', error: e instanceof Error ? e.message : String(e) })
     }
     return this.current()

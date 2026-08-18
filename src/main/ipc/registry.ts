@@ -159,7 +159,7 @@ export function registerIpc(getWindow: () => BaseWindow | null): void {
 
   /* --------------------------------- 更新 --------------------------------- */
   handle(CH.updateCheck, ({ manual }) => updater.check(Boolean(manual)))
-  handle(CH.updateDownload, () => updater.download())
+  handle(CH.updateDownload, () => updater.download(true))
   handle(CH.updateInstall, ({ force }) => updater.install(Boolean(force)))
 
   /* --------------------------------- 图谱 --------------------------------- */
