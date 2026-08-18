@@ -50,6 +50,26 @@ const server = createServer((req, res) => {
    * 预览「加载期间不许以陈旧矩形显示」这条约束，只有在加载慢到跨过兜底档位时
    * 才可能被违反；本地测试站毫秒级返回，竞态窗口根本打不开。
    */
+  /*
+   * 可控延迟的图片。
+   *
+   * 「抓图时页面还没画完」这类缺陷，只有当图片晚于页面本身到达时才复现；
+   * 本地静态文件毫秒级返回，窗口根本打不开。这里给一张纯色 PNG 加上延迟。
+   */
+  if (url.pathname === '/slow-image.png') {
+    const ms = Math.min(Number(url.searchParams.get('ms') || 700), 20000)
+    // 1x1 的纯青色 PNG，页面用 CSS 把它拉满一屏；抓到的图里那块是不是青色，一目了然
+    const cyan = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64'
+    )
+    setTimeout(() => {
+      res.writeHead(200, { 'Content-Type': MIME['.png'], 'Cache-Control': 'no-store' })
+      res.end(cyan)
+    }, ms)
+    return
+  }
+
   if (url.pathname === '/slow.html') {
     const ms = Math.min(Number(url.searchParams.get('ms') || 4000), 20000)
     setTimeout(() => {

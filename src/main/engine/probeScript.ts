@@ -101,12 +101,42 @@ export const PROBE_SCRIPT = `(() => {
   }
 })()`
 
-/** 等图片解码完成，避免拍到图还没加载的中间态 */
-export const WAIT_IMAGES_SCRIPT = `(async () => {
-  const imgs = [...document.images].filter((i) => !i.complete)
+/**
+ * 等这一屏真的画出来了再往下走。
+ *
+ * 原先只等 document.images 里 complete 为假的那些，漏了三类常见情况：
+ * - 已经 complete 但还没解码完的图，画面上仍是空的
+ * - 懒加载：视口外的图根本不该等，视口内的才要等
+ * - 字体未就位时文字不渲染（font-display: block），拍到的是一片空白
+ *
+ * 最后统一等两帧：样式与布局都落定、合成器出过一帧，这时抓图才拿得到完整画面。
+ */
+export const WAIT_PAINT_SCRIPT = `(async () => {
+  const vh = innerHeight
+  const vw = innerWidth
+  const near = (i) => {
+    const r = i.getBoundingClientRect()
+    // 稍微放宽一屏：滚动类动作之后紧接着就要抓图，边缘的图也算数
+    return r.bottom > -vh && r.top < vh * 2 && r.right > -vw && r.left < vw * 2
+  }
+  const imgs = [...document.images].filter(near)
+  const waitOne = (i) => {
+    if (i.decode) return i.decode().catch(() => undefined)
+    if (i.complete) return Promise.resolve()
+    return new Promise((r) => { i.onload = i.onerror = r })
+  }
   await Promise.race([
-    Promise.all(imgs.map((i) => new Promise((r) => { i.onload = i.onerror = r }))),
+    Promise.all([
+      document.fonts && document.fonts.ready ? document.fonts.ready.catch(() => undefined) : Promise.resolve(),
+      ...imgs.map(waitOne),
+    ]),
     new Promise((r) => setTimeout(r, 3000)),
+  ])
+  // 视图被遮住或不可见时 rAF 可能一直不触发，必须给上限——
+  // 抓图路径上任何一个无界的等待都会把整轮探索卡死
+  await Promise.race([
+    new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
+    new Promise((r) => setTimeout(r, 400)),
   ])
   return true
 })()`

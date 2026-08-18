@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { ipcMain, nativeTheme, shell, type BaseWindow } from 'electron'
+import { ipcMain, nativeImage, nativeTheme, shell, type BaseWindow } from 'electron'
 import { CH, type IpcInvokeMap, type InvokeChannel } from '@shared/ipc-contract'
 import { getDevice } from '@shared/devices'
 import { SESSION_HOLDS_PREVIEW, type FlowGraph } from '@shared/types'
@@ -223,6 +223,23 @@ function registerTestHooks(getWindow: () => BaseWindow | null): void {
   ipcMain.handle('test:wait-stable', async () => preview.driver.waitStable())
   ipcMain.handle('test:graph', async (_e, projectId: string) => loadGraph(projectId))
   ipcMain.handle('test:preview-debug', async () => preview.debugInfo())
+  /**
+   * 抓一张存档图并回报尺寸与若干采样点的颜色。
+   *
+   * 「拍到半张骨架屏」「顶部一大片空白」这类问题，断言尺寸与像素才守得住；
+   * 只看字节数是看不出画面对不对的。坐标按图像像素给。
+   */
+  ipcMain.handle('test:screenshot-probe', async (_e, points: Array<{ x: number; y: number }>) => {
+    const shot = await preview.driver.screenshot()
+    const img = nativeImage.createFromBuffer(shot.png)
+    const { width, height } = img.getSize()
+    const bmp = img.toBitmap() // BGRA
+    const samples = (points ?? []).map(({ x, y }) => {
+      const i = (Math.min(Math.max(0, y), height - 1) * width + Math.min(Math.max(0, x), width - 1)) * 4
+      return { x, y, b: bmp[i], g: bmp[i + 1], r: bmp[i + 2] }
+    })
+    return { width, height, bytes: shot.png.length, samples }
+  })
   /** 当前谁在上。弹层能不能盖住网页全看它，而这件事截图断言不了 */
   ipcMain.handle('test:ui-stack', async () => ({ front: preview.stackFront() }))
   /** 主进程日志文件的末尾。用来验证异常真的落了盘，而不是只在控制台闪了一下 */

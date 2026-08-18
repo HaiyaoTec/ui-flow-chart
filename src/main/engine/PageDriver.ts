@@ -1,6 +1,6 @@
 import { nativeImage, session, WebContentsView, type BaseWindow, type Debugger } from 'electron'
 import type { DeviceSpec, ProbeResult } from '@shared/types'
-import { PROBE_SCRIPT, WAIT_IMAGES_SCRIPT } from './probeScript'
+import { PROBE_SCRIPT, WAIT_PAINT_SCRIPT } from './probeScript'
 import { signatureOf } from './signature'
 
 export interface Bounds {
@@ -22,6 +22,9 @@ export interface Screenshot {
   /** 645px 宽 JPEG，发给 AI 与画布缩略图共用 */
   jpegBase64: string
 }
+
+/** 绘制等待的上限。到点就抓，图可能欠一点，但绝不卡住 */
+const PAINT_WAIT_MAX_MS = 4000
 
 /** 探索引擎依赖的页面能力抽象。真实实现是 CDP，测试用 fake 实现 */
 export interface IPageDriver {
@@ -419,7 +422,15 @@ export class PageDriver implements IPageDriver {
         wc.once('did-stop-loading', done)
       })
     }
-    await wc.executeJavaScript(WAIT_IMAGES_SCRIPT, true).catch(() => undefined)
+    /*
+     * 页面里的等待再怎么设上限，都可能因为渲染进程本身被挂起而不返回。
+     * 这里再兜一层：绘制等待是为了图更完整，不是必须完成的步骤，
+     * 到点就往下走，绝不能让它把抓图卡住。
+     */
+    await Promise.race([
+      wc.executeJavaScript(WAIT_PAINT_SCRIPT, true).catch(() => undefined),
+      delay(PAINT_WAIT_MAX_MS),
+    ])
     await delay(extraMs)
   }
 
@@ -467,21 +478,38 @@ export class PageDriver implements IPageDriver {
   async screenshot(): Promise<Screenshot> {
     if (!this.rawView || !this.device) throw new Error('预览视图尚未创建')
 
+    /*
+     * 抓图前再确认一次这一屏画出来了。
+     *
+     * waitStable 那次等的是「界面稳定」，中间还隔着 AI 决策与动作执行；
+     * 点击、滚动之后页面往往又要加载一批图。存档图是事后唯一的凭据，
+     * 多等这一下，换的是不再拍到半张骨架屏。
+     *
+     * 走 settle 而不是只跑一次绘制等待脚本：导航尚未结束时文档里可能还没有
+     * 那些图片元素，脚本会立刻返回、等于没等。settle 会先等这次加载结束。
+     */
+    await this.settle(0)
+
     let png: Buffer
     try {
       // clip.scale 固定输出倍率，与预览用的 fitScale 解耦——
       // 无论画面缩放到多小，存档图始终是设备原始分辨率
+      const m = (await this.send('Page.getLayoutMetrics', {}, 5000)) as {
+        cssVisualViewport?: { pageX: number; pageY: number }
+        visualViewport?: { pageX: number; pageY: number }
+      }
+      const vp = m.cssVisualViewport ?? m.visualViewport ?? { pageX: 0, pageY: 0 }
       const res = (await this.send(
         'Page.captureScreenshot',
         {
           format: 'png',
           captureBeyondViewport: false,
           clip: {
-            x: 0,
-            y: 0,
+            x: vp.pageX,
+            y: vp.pageY,
             width: this.device.width,
             height: this.device.height,
-            scale: this.device.deviceScaleFactor,
+            scale: 1,
           },
         },
         20000

@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>晚到的图片</title>
+<style>
+  html, body { margin: 0; background: #101318 }
+  /* 图片本体是 1x1 纯色，拉满一屏；没加载完时这块是页面底色 */
+  img { display: block; width: 100vw; height: 60vh; object-fit: fill }
+  .rest { height: 200vh; background: #101318 }
+</style>
+</head>
+<body>
+  <img id="hero" src="slow-image.png?ms=900" alt="" />
+  <div class="rest"></div>
+</body>
+</html>
