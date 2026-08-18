@@ -2,7 +2,7 @@ import { join } from 'node:path'
 import { ipcMain, nativeImage, nativeTheme, shell, type BaseWindow } from 'electron'
 import { CH, type IpcInvokeMap, type InvokeChannel } from '@shared/ipc-contract'
 import { getDevice } from '@shared/devices'
-import { SESSION_HOLDS_PREVIEW, type FlowGraph } from '@shared/types'
+import type { FlowGraph } from '@shared/types'
 import { createAiClient } from '../ai'
 import { GraphStore } from '../engine/graphStore'
 import { preview } from '../engine/previewManager'
@@ -99,21 +99,24 @@ export function registerIpc(getWindow: () => BaseWindow | null): void {
     const meta = getProject(id)
     if (!meta) throw new Error('项目不存在')
 
-    // 预览必须跟着项目走：换项目要换目标地址、设备与会话分区，
-    // 否则右侧还停在上一个项目的页面和登录态上。
-    // 但别的项目的会话正占着预览时不能抢——包括 paused：
-    // 它一恢复就会接着在当前页面上操作，页面被换掉就等于把动作打到了别人身上。
-    const busy = sessions.snapshot()
-    const heldByOther = Boolean(busy.projectId) && busy.projectId !== id && SESSION_HOLDS_PREVIEW.includes(busy.state)
-    if (!heldByOther) {
+    /*
+     * 预览跟着项目走。
+     *
+     * 该项目已经有会话在跑时，它的页面正停在探索到的某个深层界面上——
+     * 这时只把它切到前台，绝不重新打开：重开等于把登录态与滚动位置一起丢掉，
+     * 会话下一步的动作就会打在一个完全不同的页面上。
+     */
+    if (sessions.has(id)) {
+      await preview.setFront(id)
+    } else {
+      preview.ensure(id)
       void preview
-        .open(meta.id, meta.targetUrl, getDevice(meta.deviceId, meta.customDevice), partitionOf(meta.id))
+        .open(id, meta.targetUrl, getDevice(meta.deviceId, meta.customDevice), partitionOf(meta.id))
         .catch(() => undefined)
     }
 
-    // previewBound 交给界面提示：不然顶栏显示的是新项目，右侧却还是旧项目的页面，
-    // 用户完全看不出预览没跟过来
-    return { meta, graph: loadGraph(id), previewBound: !heldByOther }
+    // previewFront 恒为真：多会话之后不再有「预览被别的项目占着」这回事
+    return { meta, graph: loadGraph(id), previewBound: true }
   })
   handle(CH.projectDelete, ({ id }) => {
     deleteProject(id)
@@ -122,12 +125,13 @@ export function registerIpc(getWindow: () => BaseWindow | null): void {
 
   /* --------------------------------- 会话 --------------------------------- */
   handle(CH.sessionStart, ({ projectId, goal, budgets }) => sessions.start(projectId, goal, budgets))
-  handle(CH.sessionPause, () => sessions.pause())
-  handle(CH.sessionResume, () => sessions.resume())
-  handle(CH.sessionStop, () => sessions.stop())
-  handle(CH.sessionTakeoverStart, () => sessions.takeoverStart())
-  handle(CH.sessionTakeoverEnd, () => sessions.takeoverEnd())
-  handle(CH.sessionSnapshot, () => sessions.snapshot())
+  handle(CH.sessionPause, ({ projectId }) => sessions.pause(projectId))
+  handle(CH.sessionResume, ({ projectId }) => sessions.resume(projectId))
+  handle(CH.sessionStop, ({ projectId }) => sessions.stop(projectId))
+  handle(CH.sessionTakeoverStart, ({ projectId }) => sessions.takeoverStart(projectId))
+  handle(CH.sessionTakeoverEnd, ({ projectId }) => sessions.takeoverEnd(projectId))
+  handle(CH.sessionSnapshot, (req) => sessions.snapshot(req?.projectId))
+  handle(CH.sessionList, () => sessions.list())
 
   /* --------------------------------- 预览 --------------------------------- */
   handle(CH.previewSetBounds, (b) => preview.setPaneBounds(b))

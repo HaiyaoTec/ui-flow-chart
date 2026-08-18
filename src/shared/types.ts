@@ -229,12 +229,13 @@ export interface ProjectRunSummary {
 /* ------------------------------- 探索会话 -------------------------------- */
 
 /**
- * 「占着预览不放」的会话状态。
+ * 「还在跑」的会话状态。
  *
- * 预览视图全应用只有一个，处在这些状态的会话随时会继续操作它，
- * 因此不能把它重绑到别的项目上；paused 也算——恢复时会接着在当前页面上动手。
+ * 原先这个常量叫「占着预览」，一个概念混了两件事：谁在跑、谁占着屏幕。
+ * 多会话之后两者必须分开——好几个会话可以同时在跑，屏幕却只有一块，
+ * 谁在前台由 PreviewHost 说了算。paused 也算在跑：它随时会被恢复。
  */
-export const SESSION_HOLDS_PREVIEW: SessionState[] = [
+export const SESSION_ACTIVE: SessionState[] = [
   'launching',
   'observing',
   'thinking',

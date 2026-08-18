@@ -66,12 +66,12 @@ test('后台项目的图谱补丁与日志不会串到当前打开的项目', as
   }
 })
 
-test('另一个项目的会话没结束时，不能抢走预览也不能开始新探索', async () => {
+test('两个项目可以同时探索，各自的状态互不覆盖', async () => {
   const stopSite = await startTestSite()
   const { app, window } = await launchApp()
   try {
     const profile = await ipc<{ id: string }>(window, 'ai:profiles:save', {
-      profile: { id: '', name: '占用', protocol: 'openai', baseUrl: 'http://localhost:1/v1', model: 'mock' },
+      profile: { id: '', name: '并发', protocol: 'openai', baseUrl: 'http://localhost:1/v1', model: 'mock' },
       apiKey: 'k',
     })
     const a = await ipc<{ id: string }>(window, 'project:create', {
@@ -90,22 +90,36 @@ test('另一个项目的会话没结束时，不能抢走预览也不能开始�
     })
 
     await ipc(window, 'session:start', { projectId: a.id, goal: 'x' })
-    // 暂停也算占着预览：恢复时会接着在当前页面上操作
-    await ipc(window, 'session:pause').catch(() => undefined)
-    await window.waitForTimeout(800)
+    await ipc(window, 'session:start', { projectId: b.id, goal: 'x' })
 
-    const snap = await ipc<{ projectId: string | null; state: string }>(window, 'session:snapshot')
-    // AI 不通时会话可能已经失败，那样这条用例就失去意义，跳过断言
-    test.skip(snap.projectId !== a.id, `A 的会话已结束（${snap.state}），无法验证占用`)
+    /*
+     * 两个会话各自有自己的快照。
+     *
+     * 原先这里断言的是「不许并发」——单会话时代预览只有一个，第二个项目
+     * 既抢不到预览也开不了跑。现在改成一会话一个预览视图，非前台的恒隐藏，
+     * 所以并发是允许的，要守的变成「状态不串台」。
+     */
+    const sa = await ipc<{ projectId: string | null }>(window, 'session:snapshot', { projectId: a.id })
+    const sb = await ipc<{ projectId: string | null }>(window, 'session:snapshot', { projectId: b.id })
+    expect(sa.projectId, 'A 的快照必须是 A 自己的').toBe(a.id)
+    expect(sb.projectId, 'B 的快照必须是 B 自己的').toBe(b.id)
 
+    const list = await ipc<Array<{ projectId: string | null }>>(window, 'session:list')
+    expect(list.map((s) => s.projectId).sort(), '两个会话都要在列表里').toEqual([a.id, b.id].sort())
+
+    // 打开 B 只是把预览切到前台，不该把 A 的会话弄停
     const opened = await ipc<{ previewBound: boolean }>(window, 'project:open', { id: b.id })
-    expect(opened.previewBound, 'A 还占着预览，B 不该抢到').toBe(false)
+    expect(opened.previewBound, '多会话之后不再有「预览被别人占着」这回事').toBe(true)
+    const stillA = await ipc<{ projectId: string | null; state: string }>(window, 'session:snapshot', { projectId: a.id })
+    expect(stillA.projectId, '切到 B 之后 A 的会话仍然在').toBe(a.id)
 
-    await expect(ipc(window, 'session:start', { projectId: b.id, goal: 'x' }), '不该允许同时开跑两个项目').rejects.toThrow(
-      /尚未结束/
-    )
+    // 暂停 A 不能影响 B
+    await ipc(window, 'session:pause', { projectId: a.id }).catch(() => undefined)
+    const afterB = await ipc<{ state: string }>(window, 'session:snapshot', { projectId: b.id })
+    expect(afterB.state, '暂停 A 不该把 B 也停掉').not.toBe('paused')
 
-    await ipc(window, 'session:stop').catch(() => undefined)
+    await ipc(window, 'session:stop', { projectId: a.id }).catch(() => undefined)
+    await ipc(window, 'session:stop', { projectId: b.id }).catch(() => undefined)
     await window.waitForTimeout(500)
     await ipc(window, 'project:delete', { id: a.id })
     await ipc(window, 'project:delete', { id: b.id })

@@ -27,7 +27,7 @@ export default function App() {
   useEffect(() => {
     const offPatch = on(CH.evGraphPatch, applyPatch)
     const offEvent = on(CH.evSession, pushEvent)
-    void invoke(CH.sessionSnapshot).then(setSession)
+    void invoke(CH.sessionSnapshot, {}).then(setSession)
     return () => {
       offPatch()
       offEvent()

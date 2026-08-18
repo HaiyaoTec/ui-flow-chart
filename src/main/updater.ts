@@ -1,6 +1,5 @@
 import { app } from 'electron'
 import { CH, type UpdateState } from '@shared/ipc-contract'
-import { SESSION_HOLDS_PREVIEW } from '@shared/types'
 import { sessions } from './engine/sessionManager'
 import { updaterLogger } from './log'
 import { getSettings } from './store/settings'
@@ -54,9 +53,9 @@ class Updater {
   }
 
   /** 会话占着预览时不能重启：探索会中断，页面登录态也会丢 */
+  /** 任一会话还在跑就算忙。多会话之后「当前那个会话」这个说法不成立了 */
   private sessionBusy(): boolean {
-    const s = sessions.snapshot()
-    return Boolean(s.projectId) && SESSION_HOLDS_PREVIEW.includes(s.state)
+    return sessions.activeProjectIds().length > 0
   }
 
   private emit(patch: Partial<UpdateState>): void {
@@ -179,7 +178,7 @@ class Updater {
       this.emit({ error: '开发模式下不执行安装，请使用打包后的版本' })
       return this.current()
     }
-    if (this.sessionBusy()) sessions.stop()
+    if (this.sessionBusy()) sessions.stopAll()
     setImmediate(() => up.quitAndInstall())
     return this.current()
   }

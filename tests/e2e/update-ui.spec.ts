@@ -67,14 +67,16 @@ test('探索进行中不能直接重启更新', async () => {
      * paused 属于「占着预览」的状态，且不会自己往前走，是这里唯一稳定的落点。
      */
     const holding = ['launching', 'observing', 'thinking', 'acting', 'paused', 'awaiting_human', 'resuming']
-    let snap = await ipc<{ projectId: string | null; state: string }>(window, 'session:snapshot')
+    let snap = await ipc<{ projectId: string | null; state: string }>(window, 'session:snapshot', {
+      projectId: project.id,
+    })
     for (let i = 0; i < 20 && !holding.includes(snap.state); i++) {
       await window.waitForTimeout(150)
-      snap = await ipc(window, 'session:snapshot')
+      snap = await ipc(window, 'session:snapshot', { projectId: project.id })
     }
     test.skip(snap.projectId !== project.id || !holding.includes(snap.state), `会话已结束（${snap.state}），无法验证占用`)
 
-    snap = await ipc(window, 'session:pause')
+    snap = await ipc(window, 'session:pause', { projectId: project.id })
     test.skip(!holding.includes(snap.state), `会话未能暂停（${snap.state}）`)
 
     const st = await ipc<{ busy?: boolean; manualOnly?: boolean }>(window, 'test:update-state', {
@@ -89,7 +91,7 @@ test('探索进行中不能直接重启更新', async () => {
     expect(after.phase, '不该真的去安装').toBe('downloaded')
     expect(after.error, '要说明为什么装不了').toContain(st.manualOnly ? '不支持应用内更新' : '探索')
 
-    await ipc(window, 'session:stop').catch(() => undefined)
+    await ipc(window, 'session:stop', { projectId: project.id }).catch(() => undefined)
     await window.waitForTimeout(500)
     await ipc(window, 'project:delete', { id: project.id })
     await ipc(window, 'ai:profiles:delete', { id: profile.id })

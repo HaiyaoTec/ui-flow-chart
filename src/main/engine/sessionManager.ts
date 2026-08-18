@@ -2,7 +2,8 @@ import { Notification, type BaseWindow } from 'electron'
 import { getDevice } from '@shared/devices'
 import { CH } from '@shared/ipc-contract'
 import {
-  SESSION_HOLDS_PREVIEW,
+  DEFAULT_BUDGETS,
+  SESSION_ACTIVE,
   type SessionBudgets,
   type SessionSnapshot,
 } from '@shared/types'
@@ -13,9 +14,19 @@ import { ExplorerSession } from './ExplorerSession'
 import { preview } from './previewManager'
 import { getUiContents } from '../window'
 
-/** 全局唯一的探索会话。同一时刻只允许一个项目在跑 */
+/**
+ * 同时可以跑几个项目。
+ *
+ * 上限不是按 CPU 定的：后台会话的渲染进程并不会被降频（实测隐藏视图里
+ * requestAnimationFrame 照常跑满帧），所以卡点在内存与抓图吞吐——
+ * 四个几乎空白的页面已占约 900MB，真实站点每个渲染进程 150–400MB；
+ * 而存档抓图在合成器那一侧本来就是串行的，并发只会互相等。
+ */
+const MAX_CONCURRENT = 3
+
+/** 探索会话的持有者。一个项目至多一个会话，多个项目可以同时跑 */
 class SessionManager {
-  private session: ExplorerSession | null = null
+  private sessions = new Map<string, ExplorerSession>()
   private win: BaseWindow | null = null
 
   bindWindow(win: BaseWindow): void {
@@ -57,7 +68,7 @@ class SessionManager {
   /** 把会话快照写进项目元数据，节点数从当前图谱里取 */
   private persistRun(projectId: string, snapshot: SessionSnapshot, reason?: string): void {
     try {
-      const nodes = this.session?.graphNodeCount() ?? 0
+      const nodes = this.sessions.get(projectId)?.graphNodeCount() ?? 0
       /*
        * 停止原因只补不抹。
        *
@@ -81,21 +92,46 @@ class SessionManager {
     }
   }
 
+  /** 正在跑的会话数。终态的会话不占名额 */
+  private activeCount(): number {
+    let n = 0
+    for (const s of this.sessions.values()) if (SESSION_ACTIVE.includes(s.snapshot().state)) n += 1
+    return n
+  }
+
+  activeProjectIds(): string[] {
+    return [...this.sessions.entries()]
+      .filter(([, s]) => SESSION_ACTIVE.includes(s.snapshot().state))
+      .map(([id]) => id)
+  }
+
+  has(projectId: string): boolean {
+    return this.sessions.has(projectId)
+  }
+
   private ensure(projectId: string): ExplorerSession {
     const meta = getProject(projectId)
     if (!meta) throw new Error('项目不存在')
 
-    // 会话与预览都是全局单例。直接覆盖 this.session 的话，上一个会话既停不下来、
-    // 也再也拿不到引用，而它的 openTarget 还会把预览抢去自己的地址——
-    // 两个项目的操作会打在同一个页面上。
-    const cur = this.session?.snapshot()
-    if (cur && cur.projectId && cur.projectId !== projectId && SESSION_HOLDS_PREVIEW.includes(cur.state)) {
-      const name = getProject(cur.projectId)?.name ?? cur.projectId
-      throw new Error(`「${name}」的探索尚未结束（${cur.state}），请先结束它再开始新的探索`)
+    /*
+     * 一个项目至多一个会话。
+     *
+     * 这不只是产品约束：会话分区按项目派生，同一分区上如果挂两个 PageDriver，
+     * Session 级的请求头钩子会被后来者替换，先来的那个页面会带上别人的 UA。
+     * 用不变量挡住，比事后去兼容便宜得多。
+     */
+    const exist = this.sessions.get(projectId)
+    if (exist && SESSION_ACTIVE.includes(exist.snapshot().state)) return exist
+
+    if (!exist && this.activeCount() >= MAX_CONCURRENT) {
+      const names = this.activeProjectIds()
+        .map((id) => getProject(id)?.name ?? id)
+        .join('、')
+      throw new Error(`同时探索的项目最多 ${MAX_CONCURRENT} 个，当前在跑：${names}。请先结束其中一个`)
     }
 
     const ai = createAiClient(meta.aiProfileId)
-    this.session = new ExplorerSession({
+    const session = new ExplorerSession({
       driver: preview.ensure(meta.id).driver,
       ai,
       openTarget: async (url) => {
@@ -115,7 +151,8 @@ class SessionManager {
       // 带上项目 id：渲染进程可能正开着另一个项目，补丁不能画错地方
       emitPatch: (patch) => this.send(CH.evGraphPatch, { projectId: meta.id, ...patch }),
     })
-    return this.session
+    this.sessions.set(projectId, session)
+    return session
   }
 
   async start(projectId: string, goal?: string, budgets?: Partial<SessionBudgets>): Promise<SessionSnapshot> {
@@ -127,46 +164,61 @@ class SessionManager {
     return session.start(meta, goal ?? meta.goal, budgets)
   }
 
-  snapshot(): SessionSnapshot {
-    return (
-      this.session?.snapshot() ?? {
-        projectId: null,
-        state: 'idle',
-        step: 0,
-        aiCalls: 0,
-        screens: 0,
-        startedAt: null,
-        budgets: { maxSteps: 60, maxDurationMs: 1200000, maxAiCalls: 80, maxScreens: 300 },
-      }
-    )
+  /** 某个项目的会话快照。不指名时给出「哪个都不是」的空态 */
+  snapshot(projectId?: string): SessionSnapshot {
+    const s = projectId ? this.sessions.get(projectId) : null
+    return s?.snapshot() ?? idleSnapshot(projectId ?? null)
+  }
+
+  /** 全部会话的快照。项目列表与侧边栏据此显示哪些在探索 */
+  list(): SessionSnapshot[] {
+    return [...this.sessions.values()].map((s) => s.snapshot())
   }
 
   /**
-   * 没有会话时的控制指令也要留痕。
+   * 指名的会话不存在时也要留痕。
    *
    * 应用重启后会话只活在内存里、已经不存在了，这时用户点「继续」是彻底的空操作：
    * 会话记录写不了（没有 store），界面上也没有任何反馈。落一条主日志是这里
    * 唯一能留下的证据，否则事后完全看不出用户点过。
    */
-  private noSession(op: string): SessionSnapshot {
-    log.warn('session', `控制指令 ${op} 无处可发：当前没有活动会话`)
-    return this.snapshot()
+  private noSession(op: string, projectId: string): SessionSnapshot {
+    log.warn('session', `控制指令 ${op} 无处可发：${projectId} 没有活动会话`)
+    return idleSnapshot(projectId)
   }
 
-  pause(): SessionSnapshot {
-    return this.session?.pause() ?? this.noSession('pause')
+  pause(projectId: string): SessionSnapshot {
+    return this.sessions.get(projectId)?.pause() ?? this.noSession('pause', projectId)
   }
-  resume(): SessionSnapshot {
-    return this.session?.resume() ?? this.noSession('resume')
+  resume(projectId: string): SessionSnapshot {
+    return this.sessions.get(projectId)?.resume() ?? this.noSession('resume', projectId)
   }
-  stop(): SessionSnapshot {
-    return this.session?.stop() ?? this.noSession('stop')
+  stop(projectId: string): SessionSnapshot {
+    return this.sessions.get(projectId)?.stop() ?? this.noSession('stop', projectId)
   }
-  async takeoverStart(): Promise<SessionSnapshot> {
-    return (await this.session?.takeoverStart()) ?? this.noSession('takeover-start')
+  async takeoverStart(projectId: string): Promise<SessionSnapshot> {
+    return (await this.sessions.get(projectId)?.takeoverStart()) ?? this.noSession('takeover-start', projectId)
   }
-  async takeoverEnd(): Promise<SessionSnapshot> {
-    return (await this.session?.takeoverEnd()) ?? this.noSession('takeover-end')
+  async takeoverEnd(projectId: string): Promise<SessionSnapshot> {
+    return (await this.sessions.get(projectId)?.takeoverEnd()) ?? this.noSession('takeover-end', projectId)
+  }
+
+  /** 停掉全部会话。应用内更新要重启时用 */
+  stopAll(): void {
+    for (const s of this.sessions.values()) s.stop()
+  }
+}
+
+/** 「这个项目此刻没有会话」的统一表达 */
+function idleSnapshot(projectId: string | null): SessionSnapshot {
+  return {
+    projectId,
+    state: 'idle',
+    step: 0,
+    aiCalls: 0,
+    screens: 0,
+    startedAt: null,
+    budgets: DEFAULT_BUDGETS,
   }
 }
 

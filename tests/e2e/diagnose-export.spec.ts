@@ -45,7 +45,7 @@ test('诊断包不带凭证与目标站内容，分级由用户决定', async ()
      */
     await ipc(window, 'session:start', { projectId: project.id })
     await window.waitForTimeout(1500)
-    await ipc(window, 'session:stop')
+    await ipc(window, 'session:stop', { projectId: project.id })
 
     /* ---------------- 基础级 ---------------- */
     const basic = await ipc<Result>(window, 'diagnose:export', { projectId: project.id, level: 'basic' })

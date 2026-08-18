@@ -97,9 +97,9 @@ export async function runExploreCheck(win: BaseWindow, site: string, aiBase: str
 
     const waitFor = async (states: string[], ms: number): Promise<SessionSnapshot> => {
       const end = Date.now() + ms
-      let s = sessions.snapshot()
+      let s = sessions.snapshot(projectId)
       while (Date.now() < end) {
-        s = sessions.snapshot()
+        s = sessions.snapshot(projectId)
         if (states.includes(s.state)) break
         await delay(400)
       }
@@ -142,7 +142,7 @@ export async function runExploreCheck(win: BaseWindow, site: string, aiBase: str
       }
       out.afterHumanUrl = preview.driver.currentUrl()
 
-      await sessions.takeoverEnd()
+      await sessions.takeoverEnd(projectId)
       snap = await waitFor(['finished', 'failed', 'paused'], 60_000)
       out.afterTakeover = { state: snap.state, step: snap.step, screens: snap.screens }
     }

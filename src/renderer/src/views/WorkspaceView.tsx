@@ -163,31 +163,31 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
           </button>
         ) : null}
         {running && (
-          <button onClick={() => void invoke(CH.sessionPause).then(setSession)}>
+          <button onClick={() => void invoke(CH.sessionPause, { projectId: project.id }).then(setSession)}>
             <Icon name="pause" />
             暂停
           </button>
         )}
         {state === 'paused' && (
-          <button className="primary" onClick={() => void invoke(CH.sessionResume).then(setSession)}>
+          <button className="primary" onClick={() => void invoke(CH.sessionResume, { projectId: project.id }).then(setSession)}>
             <Icon name="resume" />
             继续
           </button>
         )}
         {running && (
-          <button onClick={() => void invoke(CH.sessionTakeoverStart).then(setSession)}>
+          <button onClick={() => void invoke(CH.sessionTakeoverStart, { projectId: project.id }).then(setSession)}>
             <Icon name="takeover" />
             我来接管
           </button>
         )}
         {waitingHuman && (
-          <button className="primary" onClick={() => void invoke(CH.sessionTakeoverEnd).then(setSession)}>
+          <button className="primary" onClick={() => void invoke(CH.sessionTakeoverEnd, { projectId: project.id }).then(setSession)}>
             <Icon name="takeoverEnd" />
             结束接管
           </button>
         )}
         {(running || state === 'paused' || waitingHuman || state === 'finishing') && (
-          <button className="danger" onClick={() => void invoke(CH.sessionStop).then(setSession)}>
+          <button className="danger" onClick={() => void invoke(CH.sessionStop, { projectId: project.id }).then(setSession)}>
             <Icon name="stop" />
             结束
           </button>

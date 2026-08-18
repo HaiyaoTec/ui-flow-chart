@@ -36,6 +36,7 @@ export const CH = {
   sessionTakeoverStart: 'session:takeover:start',
   sessionTakeoverEnd: 'session:takeover:end',
   sessionSnapshot: 'session:snapshot',
+  sessionList: 'session:list',
 
   previewSetBounds: 'preview:set-bounds',
   previewSetVisible: 'preview:set-visible',
@@ -189,12 +190,20 @@ export interface IpcInvokeMap {
   [CH.projectClearSession]: { req: { id: string }; res: void }
 
   [CH.sessionStart]: { req: { projectId: string; goal?: string; budgets?: Partial<SessionBudgets> }; res: SessionSnapshot }
-  [CH.sessionPause]: { req: void; res: SessionSnapshot }
-  [CH.sessionResume]: { req: void; res: SessionSnapshot }
-  [CH.sessionStop]: { req: void; res: SessionSnapshot }
-  [CH.sessionTakeoverStart]: { req: void; res: SessionSnapshot }
-  [CH.sessionTakeoverEnd]: { req: void; res: SessionSnapshot }
-  [CH.sessionSnapshot]: { req: void; res: SessionSnapshot }
+  /*
+   * 会话控制一律指名道姓。
+   *
+   * 多个项目可以同时探索，「当前会话」这个概念不再成立——不带标识的话，
+   * 用户在 A 的工作台上点暂停，停的可能是 B。
+   */
+  [CH.sessionPause]: { req: { projectId: string }; res: SessionSnapshot }
+  [CH.sessionResume]: { req: { projectId: string }; res: SessionSnapshot }
+  [CH.sessionStop]: { req: { projectId: string }; res: SessionSnapshot }
+  [CH.sessionTakeoverStart]: { req: { projectId: string }; res: SessionSnapshot }
+  [CH.sessionTakeoverEnd]: { req: { projectId: string }; res: SessionSnapshot }
+  [CH.sessionSnapshot]: { req: { projectId?: string }; res: SessionSnapshot }
+  /** 全部在跑的会话。项目列表与侧边栏据此显示「哪些在探索」 */
+  [CH.sessionList]: { req: void; res: SessionSnapshot[] }
 
   /** scale 由渲染进程给出：手动放大时矩形是裁切过的，主进程反推不出比例 */
   [CH.previewSetBounds]: { req: Bounds & { scale?: number }; res: void }
