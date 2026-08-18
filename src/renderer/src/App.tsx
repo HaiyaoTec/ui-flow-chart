@@ -16,27 +16,28 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('projects')
   const [navOpen, setNavOpen] = useState(() => localStorage.getItem('ufc.navOpen') !== '0')
   const project = useApp((s) => s.project)
-  const session = useApp((s) => s.session)
+  const sessions = useApp((s) => s.sessions)
   const closeProject = useApp((s) => s.closeProject)
   const applyPatch = useApp((s) => s.applyPatch)
   const pushEvent = useApp((s) => s.pushEvent)
-  const setSession = useApp((s) => s.setSession)
+  const setSessions = useApp((s) => s.setSessions)
 
   // 订阅放在顶层：探索在主进程后台跑，用户离开工作台后
   // 状态与日志也要继续收，否则回到列表就看不见进度了
   useEffect(() => {
     const offPatch = on(CH.evGraphPatch, applyPatch)
     const offEvent = on(CH.evSession, pushEvent)
-    void invoke(CH.sessionSnapshot, {}).then(setSession)
+    void invoke(CH.sessionList).then(setSessions)
     return () => {
       offPatch()
       offEvent()
     }
-  }, [applyPatch, pushEvent, setSession])
+  }, [applyPatch, pushEvent, setSessions])
 
   useEffect(() => localStorage.setItem('ufc.navOpen', navOpen ? '1' : '0'), [navOpen])
 
-  const waitingHuman = session?.state === 'awaiting_human'
+  // 任一会话在等人就亮：多个项目可以同时跑，红点是「有事要你处理」而不是某一个项目
+  const waitingHuman = Object.values(sessions).some((s) => s.state === 'awaiting_human')
 
   return (
     <div className="app">

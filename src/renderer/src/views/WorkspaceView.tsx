@@ -8,11 +8,14 @@ import PreviewPane from '../components/preview/PreviewPane'
 import ProjectSwitcher from '../components/ProjectSwitcher'
 import Select from '../components/Select'
 import { invoke } from '../ipc'
-import { useApp } from '../state/store'
+import { sessionOf, useApp, type LogLine } from '../state/store'
 import { STATE_LABEL } from './stateLabel'
 import './workspace.css'
 
 const RUNNING = ['launching', 'observing', 'thinking', 'acting', 'resuming']
+
+/** 恒等的空数组：每次渲染新建会让 zustand 认为状态变了，白白重渲染 */
+const EMPTY_LOGS: LogLine[] = []
 
 /** 两侧的最小可用宽度：低于这个值画布看不清、预览点不动 */
 const MIN_CANVAS = 320
@@ -29,12 +32,14 @@ interface Props {
 }
 
 export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
-  const { project, graph, session: globalSession, logs, newNodeIds, previewBound, setSession } = useApp()
+  const { project, graph, newNodeIds, previewBound, setSession } = useApp()
+  // 会话与日志都按项目取：另外几个项目可能正在后台跑，取错就会显示成别人的进度
+  const session = useApp((s) => sessionOf(s, project?.id))
+  const logs = useApp((s) => (project ? (s.logsByProject[project.id] ?? EMPTY_LOGS) : EMPTY_LOGS))
   const [otherRunningName, setOtherRunningName] = useState('')
   const dialog = useDialog()
   // 会话在主进程里是全局单例。别的项目在跑时，这里不能拿它的状态来渲染
   // ——否则工作台会显示成「正在探索」，按钮也变成暂停/结束，操作的却是另一个项目
-  const session = globalSession?.projectId === project?.id ? globalSession : null
   const [exporting, setExporting] = useState('')
   const [previewWidth, setPreviewWidth] = useState(DEFAULT_PREVIEW)
   // 收起状态记在本地，下次进来还是上次的选择
@@ -58,12 +63,13 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
       .catch(() => undefined)
   }, [])
 
-  // 提示里要能报出「是哪个项目占着预览」，光有 id 说不清
-  useEffect(() => {
-    if (previewBound || !globalSession?.projectId) return setOtherRunningName('')
-    const owner = globalSession.projectId
-    void invoke(CH.projectList).then((list) => setOtherRunningName(list.find((p) => p.id === owner)?.name ?? ''))
-  }, [previewBound, globalSession?.projectId])
+  /*
+   * 「预览被别的项目占着」这个提示随多会话一起作废。
+   *
+   * 现在一会话一个预览视图，打开哪个项目就把哪个切到前台，不存在抢不到的情况。
+   * 状态与提示位保留是为了不动界面结构，值恒为空。
+   */
+  useEffect(() => setOtherRunningName(''), [previewBound])
 
   const state = session?.state ?? 'idle'
 

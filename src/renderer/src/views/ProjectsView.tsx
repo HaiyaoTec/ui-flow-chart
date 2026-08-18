@@ -76,7 +76,11 @@ export default function ProjectsView({ onOpened }: Props) {
   const [form, setForm] = useState({ name: '', targetUrl: '', deviceId: DEFAULT_DEVICE_ID, aiProfileId: '', goal: '' })
 
   const openProject = useApp((s) => s.openProject)
-  const session = useApp((s) => s.session)
+  const sessions = useApp((s) => s.sessions)
+  // 正在跑的项目：轮询开关与「不能删」的判断都按它来，而不是某一个会话
+  const liveIds = Object.entries(sessions)
+    .filter(([, v]) => v.state !== 'idle' && v.state !== 'finished' && v.state !== 'failed')
+    .map(([id]) => id)
   const dialog = useDialog()
 
   /*
@@ -118,10 +122,10 @@ export default function ProjectsView({ onOpened }: Props) {
 
   // 后台探索会不断改动项目的更新时间，列表跟着刷新
   useEffect(() => {
-    if (!session || session.state === 'idle') return
+    if (!liveIds.length) return
     const t = setInterval(reload, 4000)
     return () => clearInterval(t)
-  }, [session?.state])
+  }, [liveIds.join()])
 
   async function startCreate() {
     // 先把配置列表拉新再开对话框：期间用户可能在设置里加过配置
@@ -162,7 +166,7 @@ export default function ProjectsView({ onOpened }: Props) {
   }
 
   async function remove(id: string) {
-    if (session?.projectId === id && session.state !== 'idle' && session.state !== 'finished') {
+    if (liveIds.includes(id)) {
       await dialog.alert({ title: '无法删除', message: '该项目正在探索中，请先结束后再删除。' })
       return
     }
@@ -179,7 +183,11 @@ export default function ProjectsView({ onOpened }: Props) {
   }
 
   /** 当前会话归属于该项目时，展示实时状态 */
-  const statusOf = (id: string) => (session?.projectId === id && session.state !== 'idle' ? session : null)
+  /** 某个项目此刻的实时状态。没在跑就回落到落盘的上次结果 */
+  const statusOf = (id: string) => {
+    const s = sessions[id]
+    return s && s.state !== 'idle' ? s : null
+  }
 
   return (
     <div className="main">

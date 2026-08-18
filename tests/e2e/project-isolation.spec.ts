@@ -129,3 +129,60 @@ test('两个项目可以同时探索，各自的状态互不覆盖', async () =>
     stopSite()
   }
 })
+
+/**
+ * 界面上的状态必须按项目取，不能是「最后一条事件是谁的就显示谁」。
+ *
+ * 会话快照原先在渲染侧只有一个槽位：B 在后台全速跑时，它的每一条事件都会把
+ * 那个槽位改写一遍，A 的工作台顶栏就会在「空闲」与运行态之间来回抖。
+ * 这条用例连续采样 A 的状态胶囊，只要抖过一次就算失败。
+ */
+test('一个项目在跑时，另一个项目的工作台状态不受影响', async () => {
+  const stopSite = await startTestSite()
+  const { app, window } = await launchApp()
+  try {
+    const profile = await ipc<{ id: string }>(window, 'ai:profiles:save', {
+      profile: { id: '', name: '分桶', protocol: 'openai', baseUrl: 'http://localhost:1/v1', model: 'mock' },
+      apiKey: 'k',
+    })
+    const a = await ipc<{ id: string }>(window, 'project:create', {
+      name: 'A 项目',
+      targetUrl: `${TEST_SITE}/ua-echo.html`,
+      deviceId: 'iphone-14-pro-max',
+      aiProfileId: profile.id,
+      goal: 'x',
+    })
+    const b = await ipc<{ id: string }>(window, 'project:create', {
+      name: 'B 项目',
+      targetUrl: `${TEST_SITE}/index.html`,
+      deviceId: 'pixel-7',
+      aiProfileId: profile.id,
+      goal: 'x',
+    })
+
+    // 界面停在 A 的工作台，B 在后台跑
+    await window.reload()
+    await window.waitForLoadState('domcontentloaded')
+    await window.waitForTimeout(600)
+    await window.locator('.project-card', { hasText: 'A 项目' }).first().click({ timeout: 15000 })
+    await window.waitForTimeout(400)
+    await ipc(window, 'session:start', { projectId: b.id, goal: 'x' })
+
+    const chip = window.locator('.ws-bar .state-chip').first()
+    const seen = new Set<string>()
+    for (let i = 0; i < 12; i += 1) {
+      seen.add(((await chip.textContent()) ?? '').trim())
+      await window.waitForTimeout(120)
+    }
+    expect([...seen], 'A 的状态胶囊不该被 B 的事件带着跳').toEqual(['空闲'])
+
+    await ipc(window, 'session:stop', { projectId: b.id }).catch(() => undefined)
+    await window.waitForTimeout(400)
+    await ipc(window, 'project:delete', { id: a.id })
+    await ipc(window, 'project:delete', { id: b.id })
+    await ipc(window, 'ai:profiles:delete', { id: profile.id })
+  } finally {
+    await app.close()
+    stopSite()
+  }
+})

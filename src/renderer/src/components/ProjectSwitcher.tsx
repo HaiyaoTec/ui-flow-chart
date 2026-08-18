@@ -22,7 +22,7 @@ export default function ProjectSwitcher({ current, onSwitched, onBackToList }: P
   const [projects, setProjects] = useState<ProjectMeta[]>([])
   const boxRef = useRef<HTMLDivElement>(null)
   const openProject = useApp((s) => s.openProject)
-  const session = useApp((s) => s.session)
+  const sessions = useApp((s) => s.sessions)
 
   useEffect(() => {
     if (!open) return
@@ -74,8 +74,9 @@ export default function ProjectSwitcher({ current, onSwitched, onBackToList }: P
             <div className="proj-pop-sep" />
 
             {projects.map((p) => {
-              const isLive = session?.projectId === p.id && session.state !== 'idle'
-              const state = isLive ? session!.state : p.lastRun?.state
+              const live = sessions[p.id]
+              const isLive = Boolean(live) && live.state !== 'idle'
+              const state = isLive ? live.state : p.lastRun?.state
               return (
                 <button key={p.id} onClick={() => void pick(p.id)} className={p.id === current.id ? 'on' : ''}>
                   <SiteIcon url={p.targetUrl} size={18} />
