@@ -43,6 +43,17 @@ function checkGraph(graph: FlowGraph | null, state: string, takeover: boolean, a
     if (!aiReview && hasVerify) fail.push('AI 返回不可解析时不该采信它的归类结果')
   }
 
+  if (!takeover) {
+    /*
+     * 边标注的对应关系：mock AI 在「手机号格式错误」那一屏输出的 edgeLabel 是
+     * 「输入手机号（过短）→ 系统校验失败」，按提示词约定它描述的是到达该屏的转移，
+     * 必须标在指向该屏的连线上。标注错位一步时，这条边上会是上一步的动作词。
+     */
+    const toInvalid = graph.edges.find((e) => e.to === 'register-phone-invalid')
+    if (!toInvalid) fail.push('缺少指向校验态界面的连线，本轮没验到边标注')
+    else if (!/系统校验失败/.test(toInvalid.label)) fail.push(`校验态入边的标注错位：${toInvalid.label}`)
+  }
+
   const pairs = new Map<string, number>()
   for (const e of graph.edges) pairs.set(`${e.from}->${e.to}`, (pairs.get(`${e.from}->${e.to}`) ?? 0) + 1)
   const over = [...pairs].filter(([, n]) => n > 1)

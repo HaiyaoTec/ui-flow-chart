@@ -170,7 +170,12 @@ export default function FlowCanvas({ graph, projectId, device, newNodeIds = [] }
                   {n.note && <div className="ufc-note">{n.note}</div>}
                 </div>
                 <div className="ufc-shot" style={{ height: layout.imgH }}>
-                  <img src={`ufc://screens/${projectId}/${n.shot}.thumb.jpg`} alt={n.title} loading="lazy" />
+                  {/* ts 作版本参数：重访已知界面会用新图顶掉半加载的首图，URL 不变的话浏览器不会重新取 */}
+                  <img
+                    src={`ufc://screens/${projectId}/${n.shot}.thumb.jpg?t=${encodeURIComponent(n.ts)}`}
+                    alt={n.title}
+                    loading="lazy"
+                  />
                 </div>
               </div>
             )

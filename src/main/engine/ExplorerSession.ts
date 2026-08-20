@@ -199,6 +199,7 @@ export class ExplorerSession {
     this.lastError = undefined
     this.currentNodeId = null
     this.lastOutcome = ''
+    this.lastActionKind = ''
     this.stopRequested = false
     this.pauseRequested = false
     this.takeoverRequested = false
@@ -362,18 +363,16 @@ export class ExplorerSession {
         this.sigHistory.push(sig)
         if (this.sigHistory.length > 12) this.sigHistory.shift()
 
+        /*
+         * 回到已知界面时先不建边。
+         *
+         * edgeLabel 按提示词约定描述「上一步动作到当前屏」的转移，只有拿到本步的
+         * AI 输出才有正确的标注。原先在这里就用上一步存下的标注建边，等于把每条边的
+         * 标注都错位一步——「自动跳转：登录状态恢复」会标到「首页 → 游戏详情」上。
+         * 建边统一在 applyScreen 里做，这里只记停滞。
+         */
         const known = store.findBySignature(sig)
-        if (known) {
-          if (this.currentNodeId && this.currentNodeId !== known.id) {
-            const edge = store.addEdge(this.currentNodeId, known.id, this.pendingEdgeLabel || '自动跳转', 'link', 'ai')
-            if (edge) {
-              store.layoutAndSave()
-              this.deps.emitPatch({ addedEdges: [edge] })
-            }
-          }
-          this.currentNodeId = known.id
-          this.noProgress += 1
-        }
+        if (known) this.noProgress += 1
 
         /* ---------- 接管判定：用户动手了就让位 ---------- */
         const userAge = await this.deps.driver.userInputAge()
@@ -406,6 +405,15 @@ export class ExplorerSession {
         }
         const action = await this.decideWithRetry(probe, shot?.jpegBase64 ?? '')
         if (!action) {
+          // 决策拿不到时「回到已知界面」这条转移也不能丢，标注只能退回兜底词
+          if (known && this.currentNodeId && this.currentNodeId !== known.id) {
+            const edge = store.addEdge(this.currentNodeId, known.id, '自动跳转', 'link', 'ai')
+            if (edge) {
+              store.layoutAndSave()
+              this.deps.emitPatch({ addedEdges: [edge] })
+            }
+            this.currentNodeId = known.id
+          }
           // 连续兜底两次仍拿不到可用动作，交回给人
           if (++this.fallbackStreak >= 2) return this.toPaused('AI 连续多次未能给出可执行的动作')
           await this.deps.driver.scrollBy(600)
@@ -453,6 +461,7 @@ export class ExplorerSession {
           if (this.deps.driver.canGoBack()) {
             this.log('warn', '同一界面尝试的动作过多，强制回退')
             await this.deps.driver.back()
+            this.lastActionKind = 'back'
             continue
           }
           this.forbid(`界面「${action.screen.title}」上的可选动作已尝试多次，请换一个入口或输出 done`)
@@ -472,6 +481,8 @@ export class ExplorerSession {
         /* ---------- 执行 ---------- */
         this.setState('acting')
         const ok = await this.execute(action, probe)
+        // 失败的动作没有产生转移，不能让它给下一条边定类型
+        this.lastActionKind = ok ? action.action : ''
         if (!ok) {
           const fails = (this.screenFails.get(sig) ?? 0) + 1
           this.screenFails.set(sig, fails)
@@ -503,7 +514,8 @@ export class ExplorerSession {
 
   /* ------------------------------ 各阶段实现 ------------------------------ */
 
-  private pendingEdgeLabel = ''
+  /** 上一步实际执行成功的动作种类，用于给「到达当前屏」的连线定类型 */
+  private lastActionKind: AiAction['action'] | '' = ''
 
   /** 把当前界面写进图谱，必要时新建节点与连线 */
   private applyScreen(
@@ -517,12 +529,21 @@ export class ExplorerSession {
     const lanes: FlowLane[] = []
     const nodes: FlowNode[] = []
     const edges: FlowEdge[] = []
+    const updated: FlowNode[] = []
 
     let nodeId: string
     let isNew = false
 
     if (known) {
       nodeId = known.id
+      // 首访时的存档图可能是半加载的（骨架屏、banner 空白），且原先只写一次、
+      // 残图永久留存。重访时页面多半已完整，用新图顶掉旧图；
+      // ts 一并更新，画布端靠它给缩略图地址换版本，否则会一直显示缓存的旧图
+      if (shot) {
+        store.saveShot(known.id, shot.png, shot.jpegBase64)
+        known.ts = new Date().toISOString()
+        updated.push(known)
+      }
     } else {
       const lane = store.ensureLane(action.screen.lane, action.screen.laneTitle || action.screen.lane)
       if (lane) lanes.push(lane)
@@ -545,26 +566,31 @@ export class ExplorerSession {
     }
 
     if (this.currentNodeId && this.currentNodeId !== nodeId) {
-      const type = this.classifyEdge(action, probe)
-      const edge = store.addEdge(this.currentNodeId, nodeId, this.pendingEdgeLabel || action.edgeLabel, type, 'ai')
+      // edgeLabel 描述的是「上一屏到当前屏」的转移（与提示词约定一致），标在本条边上
+      const type = known ? ('link' as const) : this.classifyEdge(probe, action.screen.kind)
+      const edge = store.addEdge(this.currentNodeId, nodeId, action.edgeLabel || '自动跳转', type, 'ai')
       if (edge) edges.push(edge)
     }
 
     this.currentNodeId = nodeId
-    // 本步的标注属于「当前动作导致的下一次转移」，先存着，下一轮建边时用
-    this.pendingEdgeLabel = action.edgeLabel
 
-    if (lanes.length || nodes.length || edges.length) {
+    if (lanes.length || nodes.length || edges.length || updated.length) {
       store.layoutAndSave()
-      this.deps.emitPatch({ addedLanes: lanes, addedNodes: nodes, addedEdges: edges })
+      this.deps.emitPatch({
+        addedLanes: lanes,
+        addedNodes: nodes,
+        addedEdges: edges,
+        updatedNodes: updated.length ? updated : undefined,
+      })
     }
     return { isNew, nodeId }
   }
 
-  private classifyEdge(action: AiAction, probe: ProbeResult): FlowEdge['type'] {
+  /** 给「到达当前屏」的连线定类型。back 看的是上一步实际执行的动作，而不是本步的决策 */
+  private classifyEdge(probe: ProbeResult, kind: AiAction['screen']['kind']): FlowEdge['type'] {
     if (probe.notices.length) return 'branch'
-    if (action.action === 'back') return 'back'
-    if (action.screen.kind === 'validation') return 'branch'
+    if (this.lastActionKind === 'back') return 'back'
+    if (kind === 'validation') return 'branch'
     return 'primary'
   }
 
@@ -745,6 +771,8 @@ export class ExplorerSession {
     // 把人工完成的事情告诉 AI，让它接着往下走
     const done = result.nodes.map((n) => n.note).filter(Boolean).join('；')
     this.lastOutcome = `人工接管完成${done ? `：${done}` : ''}。当前界面已变化，请基于新界面继续。`
+    // 接管期的转移是人工产生的，上一个自动动作已经不是「到达下一屏」的原因
+    this.lastActionKind = ''
     this.reason = undefined
     await this.deps.driver.clearUserInput()
     this.setState('resuming')
