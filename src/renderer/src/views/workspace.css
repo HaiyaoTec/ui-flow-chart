@@ -41,7 +41,8 @@
   color: var(--accent);
   border-color: var(--accent);
 }
-.state-chip.awaiting_human {
+.state-chip.awaiting_human,
+.state-chip.human_queued {
   color: var(--branch);
   border-color: var(--branch);
 }

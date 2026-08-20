@@ -83,6 +83,7 @@ function makeDeps(): { deps: Deps; states: string[] } {
   const deps: Deps = {
     driver: driver as never,
     ai: ai as never,
+    isFront: () => true,
     openTarget: async () => {},
     captureArchival: async () => ({ png: Buffer.alloc(0), jpegBase64: '' }),
     emit: (e) => {

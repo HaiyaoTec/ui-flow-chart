@@ -101,6 +101,7 @@ function makeDeps(flow: string[], answers: AiAction[]): {
   const deps: Deps = {
     driver: driver as never,
     ai: ai as never,
+    isFront: () => true,
     openTarget: async () => {},
     // 每次抓图内容都不同，用于断言「哪一次的图」落了盘
     captureArchival: async () => {

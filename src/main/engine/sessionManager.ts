@@ -28,6 +28,8 @@ const MAX_CONCURRENT = 3
 class SessionManager {
   private sessions = new Map<string, ExplorerSession>()
   private win: BaseWindow | null = null
+  /** 任务栏闪烁的 focus 监听是否已挂。窗口级只挂一个，见 alertHuman */
+  private flashListening = false
 
   bindWindow(win: BaseWindow): void {
     this.win = win
@@ -35,7 +37,10 @@ class SessionManager {
 
   /** 窗口关闭时置空，等下一个窗口绑上来。不置空的话事件会一直发往已销毁的窗口 */
   unbindWindow(win: BaseWindow): void {
-    if (this.win === win) this.win = null
+    if (this.win === win) {
+      this.win = null
+      this.flashListening = false
+    }
   }
 
   private send(channel: string, payload: unknown): void {
@@ -46,14 +51,37 @@ class SessionManager {
   /**
    * 探索是在后台跑的，用户可能已经切走或最小化了窗口。
    * 需要真人介入时必须主动叫人，否则会一直干等着。
+   *
+   * 多个项目同时在等时通知合并成一条「N 个项目在等你接管」——
+   * 各弹一条的话每条各挂一个 focus 监听，用户聚焦一次会把后续告警的闪烁一起清掉。
    */
   private alertHuman(projectName: string, reason: string): void {
-    this.notify(`${projectName} 需要你介入`, reason)
+    const waiting = this.waitingHumanNames()
+    waiting.add(projectName)
+    if (waiting.size > 1) this.notify(`${waiting.size} 个项目在等你接管`, [...waiting].join('、'))
+    else this.notify(`${projectName} 需要你介入`, reason)
+
     if (this.win && !this.win.isDestroyed() && !this.win.isFocused()) {
       this.win.flashFrame(true)
-      // 窗口一被聚焦就停掉任务栏闪烁
-      this.win.once('focus', () => this.win?.flashFrame(false))
+      // 窗口级只挂一个 focus 监听，聚焦后停掉任务栏闪烁
+      if (!this.flashListening) {
+        this.flashListening = true
+        this.win.once('focus', () => {
+          this.win?.flashFrame(false)
+          this.flashListening = false
+        })
+      }
     }
+  }
+
+  /** 正在等人（排队或已在录制）的项目名 */
+  private waitingHumanNames(): Set<string> {
+    const names = new Set<string>()
+    for (const [id, s] of this.sessions) {
+      const st = s.snapshot().state
+      if (st === 'awaiting_human' || st === 'human_queued') names.add(getProject(id)?.name ?? id)
+    }
+    return names
   }
 
   private notify(title: string, body: string): void {
@@ -134,6 +162,8 @@ class SessionManager {
     const session = new ExplorerSession({
       driver: preview.ensure(meta.id).driver,
       ai,
+      // 人工接管只有前台才能进行：屏幕上显示的是不是本项目由 PreviewHost 说了算
+      isFront: () => preview.frontProjectId() === meta.id,
       openTarget: async (url) => {
         await preview.open(meta.id, url, getDevice(meta.deviceId, meta.customDevice), partitionOf(meta.id))
       },

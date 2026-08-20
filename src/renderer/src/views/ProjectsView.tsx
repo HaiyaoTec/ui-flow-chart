@@ -231,7 +231,7 @@ export default function ProjectsView({ onOpened }: Props) {
             const live = statusOf(p.id)
             // 有活动会话就显示实时状态，否则回落到上次探索的落盘结果
             const status = liveOrLast(live, p.lastRun)
-            const needHuman = status?.state === 'awaiting_human'
+            const needHuman = status?.state === 'awaiting_human' || status?.state === 'human_queued'
             // 走 getDevice 而不是直接 find：老项目里存的是改版前的设备 id
             const device = getDevice(p.deviceId)
             return (

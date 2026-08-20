@@ -127,6 +127,9 @@ export class SessionPreview {
   hideForBackground(): void {
     this.background = true
     this.driver.setVisible(false)
+    // 前台期间用户的真实输入不能残留：探索会话据 userInputAge 判定「用户想接管」，
+    // 切换两侧各清一次，陈旧输入才不会在切回时被误判成新的接管意图
+    if (this.driver.attached) void this.driver.clearUserInput()
   }
 
   /**
@@ -138,6 +141,7 @@ export class SessionPreview {
   async showForForeground(): Promise<void> {
     this.background = false
     if (!this.driver.attached) return
+    await this.driver.clearUserInput()
     this.holdUntilPane()
     await this.syncViewport(true)
     this.releasePane()

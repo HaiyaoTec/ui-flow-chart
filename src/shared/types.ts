@@ -241,11 +241,17 @@ export const SESSION_ACTIVE: SessionState[] = [
   'thinking',
   'acting',
   'paused',
+  'human_queued',
   'awaiting_human',
   'resuming',
   'finishing',
 ]
 
+/**
+ * human_queued 与 awaiting_human 的分界是「有没有拿到屏幕」：
+ * 屏幕只有一块，后台会话判定需要人工时先排队（human_queued，不建录制器、不计时长），
+ * 用户打开该项目、预览切到前台后才转 awaiting_human 并开始录制。
+ */
 export type SessionState =
   | 'idle'
   | 'launching'
@@ -253,6 +259,7 @@ export type SessionState =
   | 'thinking'
   | 'acting'
   | 'paused'
+  | 'human_queued'
   | 'awaiting_human'
   | 'resuming'
   | 'finishing'

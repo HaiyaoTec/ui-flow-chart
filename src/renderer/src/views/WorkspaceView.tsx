@@ -115,6 +115,8 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
 
   const running = RUNNING.includes(state)
   const waitingHuman = state === 'awaiting_human'
+  // 排队态在打开着的项目里只会短暂出现（打开即申请前台并转入录制），但按钮不能缺位
+  const queuedHuman = state === 'human_queued'
   const device = getDevice(project.deviceId, project.customDevice)
   const bodyWidth = bodyRef.current?.clientWidth ?? 0
   const logCollapsed = bodyWidth > 0 && previewWidth / bodyWidth >= LOG_COLLAPSE_RATIO
@@ -186,13 +188,13 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
             我来接管
           </button>
         )}
-        {waitingHuman && (
+        {(waitingHuman || queuedHuman) && (
           <button className="primary" onClick={() => void invoke(CH.sessionTakeoverEnd, { projectId: project.id }).then(setSession)}>
             <Icon name="takeoverEnd" />
             结束接管
           </button>
         )}
-        {(running || state === 'paused' || waitingHuman || state === 'finishing') && (
+        {(running || state === 'paused' || waitingHuman || queuedHuman || state === 'finishing') && (
           <button className="danger" onClick={() => void invoke(CH.sessionStop, { projectId: project.id }).then(setSession)}>
             <Icon name="stop" />
             结束

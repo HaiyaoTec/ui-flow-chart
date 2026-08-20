@@ -30,6 +30,8 @@ import { WatchRecorder } from './watchRecorder'
 export interface SessionDeps {
   driver: PageDriver
   ai: IAiClient
+  /** 本会话的预览此刻是否占着屏幕。人工接管只有前台才能进行，后台要排队 */
+  isFront: () => boolean
   /** 打开目标站并铺好设备模拟 */
   openTarget: (url: string) => Promise<void>
   /** 抓存档图。走预览管理器而不是 driver：抓图期间要用静帧顶住屏幕区 */
@@ -277,7 +279,7 @@ export class ExplorerSession {
 
   /** 进入人工接管：放开输入屏蔽，转为被动录制 */
   async takeoverStart(reasonText = '用户主动接管'): Promise<SessionSnapshot> {
-    const accepted = this.state !== 'awaiting_human'
+    const accepted = this.state !== 'awaiting_human' && this.state !== 'human_queued'
     this.control('takeover-start', accepted, reasonText)
     if (!accepted) return this.snapshot()
     this.takeoverRequested = true
@@ -287,9 +289,9 @@ export class ExplorerSession {
   }
 
   async takeoverEnd(): Promise<SessionSnapshot> {
-    // 用标志位而不是只调 watcher.stop()：结束请求可能早于录制器创建，
-    // 那时 stop() 是空操作，会话就永远停在等待人工上
-    this.control('takeover-end', this.state === 'awaiting_human')
+    // 用标志位而不是只调 watcher.stop()：结束请求可能早于录制器创建
+    // （排队期就没有录制器），那时 stop() 是空操作，会话就永远停在等待人工上
+    this.control('takeover-end', this.state === 'awaiting_human' || this.state === 'human_queued')
     this.takeoverEndRequested = true
     this.watcher?.stop()
     return this.snapshot()
@@ -374,14 +376,18 @@ export class ExplorerSession {
         const known = store.findBySignature(sig)
         if (known) this.noProgress += 1
 
-        /* ---------- 接管判定：用户动手了就让位 ---------- */
-        const userAge = await this.deps.driver.userInputAge()
-        if (userAge !== null && userAge < 8000) {
-          await this.deps.driver.clearUserInput()
-          this.takeoverRequested = true
-          this.reason = '检测到你在预览窗口中操作，已转为人工接管'
-          this.emit({ kind: 'need-human', reason: this.reason, hint: '完成后点击「结束接管」，AI 会接着往下走' })
-          continue
+        /* ---------- 接管判定：用户动手了就让位 ----------
+         * 只对前台会话有意义：后台视图是隐藏的，用户根本碰不到，
+         * 探测到的只会是自动化残留或切后台前的陈旧输入。 */
+        if (this.deps.isFront()) {
+          const userAge = await this.deps.driver.userInputAge()
+          if (userAge !== null && userAge < 8000) {
+            await this.deps.driver.clearUserInput()
+            this.takeoverRequested = true
+            this.reason = '检测到你在预览窗口中操作，已转为人工接管'
+            this.emit({ kind: 'need-human', reason: this.reason, hint: '完成后点击「结束接管」，AI 会接着往下走' })
+            continue
+          }
         }
 
         /* ---------- 启发式接管判定 ---------- */
@@ -720,56 +726,84 @@ export class ExplorerSession {
     }
   }
 
-  /** 人工接管：放开输入屏蔽，被动录制直到用户结束 */
+  /** 排队期查看前台的间隔。用户打开项目后最多等这么久就转入录制 */
+  private static readonly QUEUE_POLL_MS = 500
+
+  /**
+   * 人工接管：放开输入屏蔽，被动录制直到用户结束。
+   *
+   * 屏幕只有一块。后台会话判定需要人工时先进 human_queued 排队——
+   * 不建录制器（700ms 轮询会在没人看的页面上空转、白耗 maxScreens 额度），
+   * 也不计时长（human_queued 不在 RUNNING_STATES 里）。用户打开该项目、
+   * 预览切到前台后才转 awaiting_human 并开始录制；录制中被抢占
+   * （用户切去别的项目）就停录制、降回排队，已录节点已随录制逐屏落盘。
+   */
   private async runTakeover(): Promise<void> {
     const store = this.store!
     this.takeoverRequested = false
     this.takeoverEndRequested = false
     const reasonSource = this.reason
-    this.takeoverAt = Date.now()
-    this.takeoverSeq += 1
-    const seq = this.takeoverSeq
-    this.setState('awaiting_human', this.reason)
-    await this.deps.driver.clearUserInput()
+    const doneNotes: string[] = []
 
-    this.watcher = new WatchRecorder(this.deps.driver, store, {
-      lane: MANUAL_LANE_ID,
-      laneTitle: MANUAL_LANE_TITLE,
-      // 剩余额度按本轮起算点算，否则二次探索时这里会算成负数并被夹到 1
-      maxScreens: Math.max(1, this.budgets.maxScreens - (this.screens - this.base.screens)),
-      onPatch: (patch) => this.deps.emitPatch(patch),
-      capture: () => this.deps.captureArchival(),
-      // 控件事件与会话记录要能对上：哪一轮、第几次接管
-      meta: { runId: this.runId, takeoverSeq: seq },
-    })
+    while (!this.stopRequested && !this.takeoverEndRequested) {
+      if (!this.deps.isFront()) {
+        if (this.state !== 'human_queued') this.setState('human_queued', this.reason ?? reasonSource)
+        await delay(ExplorerSession.QUEUE_POLL_MS)
+        continue
+      }
 
-    const stopWatch = () => this.takeoverEndRequested || this.stopRequested
-    const result = await this.watcher.run(this.currentNodeId, stopWatch)
-    this.watcher = null
+      this.takeoverAt = Date.now()
+      this.takeoverSeq += 1
+      const seq = this.takeoverSeq
+      this.setState('awaiting_human', this.reason ?? reasonSource)
+      await this.deps.driver.clearUserInput()
 
-    this.screens += result.nodes.length
-    if (result.lastNodeId) this.currentNodeId = result.lastNodeId
+      this.watcher = new WatchRecorder(this.deps.driver, store, {
+        lane: MANUAL_LANE_ID,
+        laneTitle: MANUAL_LANE_TITLE,
+        // 剩余额度按本轮起算点算，否则二次探索时这里会算成负数并被夹到 1；
+        // 多段接管时 screens 已含前面段落录下的屏数，额度随之递减
+        maxScreens: Math.max(1, this.budgets.maxScreens - (this.screens - this.base.screens)),
+        onPatch: (patch) => this.deps.emitPatch(patch),
+        capture: () => this.deps.captureArchival(),
+        // 控件事件与会话记录要能对上：哪一轮、第几次接管
+        meta: { runId: this.runId, takeoverSeq: seq },
+      })
 
-    /*
-     * 接管区间落盘。
-     *
-     * 三种退出路径过去产生的记录一模一样（都只有一条 resuming），
-     * 事后分不出是用户点了结束、被整体停止，还是录制器自己抓满了额度——
-     * 而最后那种恰恰意味着用户还在操作、系统单方面停了录制。
-     */
-    this.record({
-      kind: 'takeover',
-      seq,
-      startedAt: this.takeoverAt,
-      endedAt: Date.now(),
-      endedBy: this.stopRequested ? 'stop' : this.takeoverEndRequested ? 'user' : 'max-screens',
-      reasonSource,
-      nodesAdded: result.nodes.length,
-    })
-    this.takeoverAt = 0
+      const stopWatch = () => this.takeoverEndRequested || this.stopRequested || !this.deps.isFront()
+      const result = await this.watcher.run(this.currentNodeId, stopWatch)
+      this.watcher = null
+
+      this.screens += result.nodes.length
+      doneNotes.push(...result.nodes.map((n) => n.note).filter((s): s is string => Boolean(s)))
+      if (result.lastNodeId) this.currentNodeId = result.lastNodeId
+
+      /*
+       * 接管区间落盘。
+       *
+       * 四种退出路径的记录必须分得开：用户点了结束、被整体停止、被别的项目
+       * 抢走前台，还是录制器自己抓满了额度——最后那种恰恰意味着用户还在操作、
+       * 系统单方面停了录制。
+       */
+      const preempted = !this.stopRequested && !this.takeoverEndRequested && !this.deps.isFront()
+      this.record({
+        kind: 'takeover',
+        seq,
+        startedAt: this.takeoverAt,
+        endedAt: Date.now(),
+        endedBy: this.stopRequested ? 'stop' : this.takeoverEndRequested ? 'user' : preempted ? 'preempted' : 'max-screens',
+        reasonSource,
+        nodesAdded: result.nodes.length,
+      })
+      this.takeoverAt = 0
+
+      // 被抢占：降回排队等用户回来，其余退出路径都结束接管
+      if (preempted) continue
+      break
+    }
 
     // 把人工完成的事情告诉 AI，让它接着往下走
-    const done = result.nodes.map((n) => n.note).filter(Boolean).join('；')
+    const done = [...new Set(doneNotes)].join('；')
     this.lastOutcome = `人工接管完成${done ? `：${done}` : ''}。当前界面已变化，请基于新界面继续。`
     // 接管期的转移是人工产生的，上一个自动动作已经不是「到达下一屏」的原因
     this.lastActionKind = ''

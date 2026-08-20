@@ -8,6 +8,7 @@ export const STATE_LABEL: Record<SessionState, string> = {
   thinking: 'AI 决策中',
   acting: '执行操作',
   paused: '已暂停',
+  human_queued: '排队等待接管',
   awaiting_human: '等待人工',
   resuming: '恢复中',
   finishing: '收尾中',
