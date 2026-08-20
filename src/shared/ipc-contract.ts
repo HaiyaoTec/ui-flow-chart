@@ -239,10 +239,11 @@ export interface IpcInvokeMap {
   /** force=true 才允许在探索进行中重启（会中断探索） */
   [CH.updateInstall]: { req: { force?: boolean }; res: UpdateState }
 
-  [CH.graphUpdateNode]: { req: { id: string; patch: Record<string, unknown> }; res: void }
-  [CH.graphUpdateEdge]: { req: { id: string; patch: Record<string, unknown> }; res: void }
-  [CH.graphDeleteNode]: { req: { id: string }; res: void }
-  [CH.graphRelayout]: { req: void; res: FlowGraph }
+  // 图谱编辑显式指名项目：多会话下从「当前会话」反推目标项目会写错对象
+  [CH.graphUpdateNode]: { req: { projectId: string; id: string; patch: Record<string, unknown> }; res: void }
+  [CH.graphUpdateEdge]: { req: { projectId: string; id: string; patch: Record<string, unknown> }; res: void }
+  [CH.graphDeleteNode]: { req: { projectId: string; id: string }; res: void }
+  [CH.graphRelayout]: { req: { projectId: string }; res: FlowGraph }
 
   [CH.exportHtml]: { req: { projectId: string }; res: ExportResult }
   [CH.exportPng]: { req: { projectId: string; scale?: number }; res: ExportResult }

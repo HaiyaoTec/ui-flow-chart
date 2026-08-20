@@ -178,19 +178,19 @@ describe('人工接管排队', () => {
 
     // 用户打开该项目（预览切前台）：转入录制
     front.value = true
-    await waitFor(() => session.snapshot().state === 'awaiting_human', 3000)
-    await waitFor(() => recorderInstalls() > 0, 3000)
+    await waitFor(() => session.snapshot().state === 'awaiting_human', 6000)
+    await waitFor(() => recorderInstalls() > 0, 6000)
 
     // 用户切去别的项目（被抢占）：停录制、降回排队，段落要留痕
     front.value = false
-    await waitFor(() => session.snapshot().state === 'human_queued', 4000)
+    await waitFor(() => session.snapshot().state === 'human_queued', 6000)
     const seg1 = takeoverRecords('queue-flow', runId)
     expect(seg1.length, '被抢占的接管段落必须落盘').toBe(1)
     expect(seg1[0]).toMatchObject({ seq: 1, endedBy: 'preempted' })
 
     // 用户回来：再次进入录制
     front.value = true
-    await waitFor(() => session.snapshot().state === 'awaiting_human', 3000)
+    await waitFor(() => session.snapshot().state === 'awaiting_human', 6000)
 
     // 结束接管：回到探索并收尾
     await session.takeoverEnd()

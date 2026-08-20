@@ -163,26 +163,17 @@ export function registerIpc(getWindow: () => BaseWindow | null): void {
   handle(CH.updateInstall, ({ force }) => updater.install(Boolean(force)))
 
   /* --------------------------------- 图谱 --------------------------------- */
-  handle(CH.graphUpdateNode, ({ id, patch }) => {
-    const pid = sessions.snapshot().projectId
-    if (!pid) throw new Error('没有已打开的项目')
-    withStore(pid, (s) => s.updateNode(id, patch as never))
+  // 一律由调用方显式指名项目：多会话下从「当前会话」反推目标项目会写错对象
+  handle(CH.graphUpdateNode, ({ projectId, id, patch }) => {
+    withStore(projectId, (s) => s.updateNode(id, patch as never))
   })
-  handle(CH.graphUpdateEdge, ({ id, patch }) => {
-    const pid = sessions.snapshot().projectId
-    if (!pid) throw new Error('没有已打开的项目')
-    withStore(pid, (s) => s.updateEdge(id, patch as never))
+  handle(CH.graphUpdateEdge, ({ projectId, id, patch }) => {
+    withStore(projectId, (s) => s.updateEdge(id, patch as never))
   })
-  handle(CH.graphDeleteNode, ({ id }) => {
-    const pid = sessions.snapshot().projectId
-    if (!pid) throw new Error('没有已打开的项目')
-    withStore(pid, (s) => s.deleteNode(id))
+  handle(CH.graphDeleteNode, ({ projectId, id }) => {
+    withStore(projectId, (s) => s.deleteNode(id))
   })
-  handle(CH.graphRelayout, () => {
-    const pid = sessions.snapshot().projectId
-    if (!pid) throw new Error('没有已打开的项目')
-    return withStore(pid, (s) => s.relayout())
-  })
+  handle(CH.graphRelayout, ({ projectId }) => withStore(projectId, (s) => s.relayout()))
 
   /* --------------------------------- 导出 --------------------------------- */
   handle(CH.exportHtml, ({ projectId }) => exportProjectHtml(projectId))

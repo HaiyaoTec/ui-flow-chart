@@ -25,9 +25,17 @@ function checkGraph(graph: FlowGraph | null, state: string, takeover: boolean, a
   }
 
   if (takeover) {
-    // 先确认这一轮真的录到了人工接管界面。录不到的话下面几条都会空过，
-    // 那是「什么都没验到」而不是「验过了没问题」
-    if (!graph.nodes.some((n) => n.kind === 'manual')) fail.push('没有录到人工接管界面，本轮没验到归类')
+    /*
+     * 录制内容钉死：验证码页与验证成功页各一屏。
+     *
+     * 早先只断言「录到过人工界面」，模拟点击与录制器 700ms 轮询的相位不同时，
+     * success 有时由录制器录、有时由 AI 步建，两次运行产出不同图谱且都能通过。
+     * 现在自检等到两屏都入库才结束接管（见 runExploreCheck），这里按定数断言。
+     */
+    const human = graph.nodes.filter((n) => n.createdBy === 'human')
+    if (human.length !== 2) fail.push(`人工接管期应录到恰好 2 屏，实际 ${human.length} 屏`)
+    if (!human.some((n) => n.url.includes('captcha'))) fail.push('没有录到验证码界面')
+    if (!human.some((n) => n.url.includes('success'))) fail.push('没有录到验证成功界面')
 
     // 这两条与 AI 无关：确定性层的继承回落单独就该把节点挪出临时泳道
     if (graph.lanes.some((l) => l.id === MANUAL_LANE_ID)) fail.push('收尾后仍存在人工接管泳道')
@@ -122,14 +130,30 @@ export async function runExploreCheck(win: BaseWindow, site: string, aiBase: str
 
     if (takeover && snap.state === 'awaiting_human') {
       out.needHuman = snap.reason
+
+      const humanNodes = (): number => {
+        const g = readJson<FlowGraph | null>(join(projectDir(project.id), 'graph.json'), null)
+        return g ? g.nodes.filter((n) => n.createdBy === 'human').length : 0
+      }
+      const waitHumanNodes = async (count: number, ms: number): Promise<boolean> => {
+        const end = Date.now() + ms
+        while (Date.now() < end) {
+          if (humanNodes() >= count) return true
+          await delay(300)
+        }
+        return false
+      }
+
       /*
-       * 先停一下再动手。
+       * 与录制器按「已录屏数」同步，而不是按固定时长。
        *
-       * 录制器靠「连续两次探针签名一致」才认一屏（两轮各 700ms），立刻点掉验证码的话
-       * 页面会在双确认完成前跳走，这一轮就一个人工接管界面都录不到——
-       * 后面关于归类的断言全部空过。停两秒，验证码页必定入库。
+       * 录制器靠「连续两次探针签名一致」才认一屏（两轮各 700ms）。早先这里固定停
+       * 2 秒再动手，能保证验证码页入库；但点掉验证码之后什么时候结束接管全凭运气——
+       * success 页有时录到、有时录不到，连续两次自检会产出不同的图谱，
+       * 而两种结果的断言都能通过，抖动因此是隐形的。
+       * 改为：验证码页入库后才动手，成功页也入库后才结束接管，录制内容成为定数。
        */
-      await delay(2000)
+      out.captchaRecorded = await waitHumanNodes(1, 15_000)
 
       /*
        * 模拟真人：在验证码页按对图形（脚本无法从截图判断，必须真人操作）。
@@ -152,6 +176,7 @@ export async function runExploreCheck(win: BaseWindow, site: string, aiBase: str
         }
       }
       out.afterHumanUrl = preview.driver.currentUrl()
+      out.successRecorded = await waitHumanNodes(2, 15_000)
 
       await sessions.takeoverEnd(projectId)
       snap = await waitFor(['finished', 'failed', 'paused'], 60_000)
