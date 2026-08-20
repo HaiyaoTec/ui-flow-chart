@@ -67,8 +67,21 @@ export class SessionPreview {
    * 否则先发起的那次会在后发起的那次进行中把闸门打开。
    */
   private openGen = 0
-  /** 视口同步的串行队列 */
-  private applyChain: Promise<void> = Promise.resolve()
+  /**
+   * 视口同步与抓图共用的串行队列。
+   *
+   * 抓图（CDP 按 clip.scale 临时光栅化整块合成面）与视口同步（下发 Emulation
+   * 命令改缩放）并发时互相踩：窗口缩放、分栏拖动期间抓的存档图会按错误的几何
+   * 出图，表现为放大裁切的局部画面。两类操作都排进同一条链，天然互斥。
+   */
+  private applyChain: Promise<unknown> = Promise.resolve()
+
+  /** 把任务排进串行链。链本身不能因为某次任务失败而断掉，错误照常抛给调用方 */
+  private chained<T>(fn: () => Promise<T>): Promise<T> {
+    const next = this.applyChain.then(fn, fn)
+    this.applyChain = next.catch(() => undefined)
+    return next
+  }
   /**
    * 是否在后台跑。
    *
@@ -332,28 +345,25 @@ export class SessionPreview {
 
   /** 串行下发，且 scale 与 bounds 取自同一快照 */
   private syncViewport(force = false): Promise<void> {
-    this.applyChain = this.applyChain
-      .then(async () => {
-        if (!this.driver.attached || this.opening) return
-        const pane = this.pane
-        const fit = this.scaleFor(pane)
-        // 面板只是平移时缩放没变，没必要重发 Emulation 命令去打扰页面，
-        // 挪一下视图即可；拖拽调窗口大小时这条路径会被高频命中
-        if (force || Math.abs(fit - this.driver.currentScale()) > 0.0005) {
-          await this.driver.applyDevice(this.device, fit)
-        }
-        this.applyBounds(pane, fit)
-        // 尺寸一变就作废整帧：不主动重绘的话，合成器会把旧图块铺满新尺寸，
-        // 表现为同一屏内容在框里重复好几遍
-        this.driver.repaint()
-        // 到这里矩形才算真的落到视图上。标记只能置在这个分支里——
-        // 顶部那个 opening 早退是 resolve 不是 reject，放在链外等于没判
-        this.paneApplied = true
-      })
-      .catch(() => {
-        /* 单次同步失败不影响后续 */
-      })
-    return this.applyChain
+    return this.chained(async () => {
+      if (!this.driver.attached || this.opening) return
+      const pane = this.pane
+      const fit = this.scaleFor(pane)
+      // 面板只是平移时缩放没变，没必要重发 Emulation 命令去打扰页面，
+      // 挪一下视图即可；拖拽调窗口大小时这条路径会被高频命中
+      if (force || Math.abs(fit - this.driver.currentScale()) > 0.0005) {
+        await this.driver.applyDevice(this.device, fit)
+      }
+      this.applyBounds(pane, fit)
+      // 尺寸一变就作废整帧：不主动重绘的话，合成器会把旧图块铺满新尺寸，
+      // 表现为同一屏内容在框里重复好几遍
+      this.driver.repaint()
+      // 到这里矩形才算真的落到视图上。标记只能置在这个分支里——
+      // 顶部那个 opening 早退是 resolve 不是 reject，放在链外等于没判
+      this.paneApplied = true
+    }).catch(() => {
+      /* 单次同步失败不影响后续 */
+    })
   }
 
   /**
@@ -395,7 +405,8 @@ export class SessionPreview {
   /** 纯抓图。静帧顶替与层级由窗口级的 PreviewHost 统筹，见 captureArchival */
   async capture(): Promise<Screenshot> {
     if (!this.driver.attached) throw new Error('预览视图尚未创建')
-    return this.driver.screenshot()
+    // 排进视口同步的串行链：抓图期间不允许下发 Emulation 命令，理由见 applyChain
+    return this.chained(() => this.driver.screenshot())
   }
 
   /**

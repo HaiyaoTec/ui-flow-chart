@@ -1,5 +1,6 @@
-import { nativeImage, session, WebContentsView, type BaseWindow, type Debugger } from 'electron'
+import { nativeImage, session, WebContentsView, type BaseWindow, type Debugger, type NativeImage } from 'electron'
 import type { DeviceSpec, ProbeResult } from '@shared/types'
+import { log } from '../log'
 import { PROBE_SCRIPT, WAIT_PAINT_SCRIPT } from './probeScript'
 import { signatureOf } from './signature'
 
@@ -491,30 +492,32 @@ export class PageDriver implements IPageDriver {
     await this.settle(0)
 
     let png: Buffer
+    let img: NativeImage
     try {
-      // clip.scale 固定输出倍率，与预览用的 fitScale 解耦——
-      // 无论画面缩放到多小，存档图始终是设备原始分辨率
-      const m = (await this.send('Page.getLayoutMetrics', {}, 5000)) as {
-        cssVisualViewport?: { pageX: number; pageY: number }
-        visualViewport?: { pageX: number; pageY: number }
+      png = await this.captureViaCdp()
+      img = nativeImage.createFromBuffer(png)
+      /*
+       * 尺寸自检 + 自愈。
+       *
+       * clip 定了设备逻辑尺寸、scale 传 1，输出应恒为「设备宽高 × 设备像素比」。
+       * 与预期不符说明设备模拟没有落在这次渲染上（跨进程导航把 override 换掉、
+       * 抓图与视口同步竞争等）——拍出来就是放大裁切的局部画面。
+       * 重放一遍 override 再抓一次；仍不符就保留现图并留痕，供诊断包定位。
+       */
+      if (this.badShotSize(img)) {
+        const got = img.getSize()
+        log.warn(
+          'driver',
+          `存档图尺寸异常（${got.width}×${got.height}，应为 ${this.expectedShotSize()}），重放设备模拟后重抓`
+        )
+        await this.applyDevice(this.device, this.inputScale)
+        png = await this.captureViaCdp()
+        img = nativeImage.createFromBuffer(png)
+        if (this.badShotSize(img)) {
+          const again = img.getSize()
+          log.warn('driver', `重抓后存档图尺寸仍异常（${again.width}×${again.height}），已保留该图`)
+        }
       }
-      const vp = m.cssVisualViewport ?? m.visualViewport ?? { pageX: 0, pageY: 0 }
-      const res = (await this.send(
-        'Page.captureScreenshot',
-        {
-          format: 'png',
-          captureBeyondViewport: false,
-          clip: {
-            x: vp.pageX,
-            y: vp.pageY,
-            width: this.device.width,
-            height: this.device.height,
-            scale: 1,
-          },
-        },
-        20000
-      )) as { data: string }
-      png = Buffer.from(res.data, 'base64')
     } catch (e) {
       /*
        * 合成器偶尔出不了帧（导航中等），退回 Electron 自带的抓图。
@@ -523,7 +526,7 @@ export class PageDriver implements IPageDriver {
        * 而 CDP 那条路在隐藏时反而是好的。所以它只兜得住前台的偶发失败，
        * 后台会话真出问题时这里拿到的是空图。
        */
-      const img = await this.rawView.webContents.capturePage().catch(() => nativeImage.createEmpty())
+      img = await this.rawView.webContents.capturePage().catch(() => nativeImage.createEmpty())
       png = img.toPNG()
       if (png.length === 0) {
         throw new Error(`抓图失败：${e instanceof Error ? e.message : String(e)}`)
@@ -538,11 +541,53 @@ export class PageDriver implements IPageDriver {
      * 完全看不出当时发生过什么。
      */
     if (png.length === 0) throw new Error('抓图失败：返回了空图')
-
-    const img = nativeImage.createFromBuffer(png)
     if (img.isEmpty()) throw new Error('抓图失败：图像无法解析')
     const thumb = img.resize({ width: SCREENSHOT_WIDTH_FOR_AI, quality: 'good' })
     return { png, jpegBase64: thumb.toJPEG(80).toString('base64') }
+  }
+
+  /** CDP 抓一张设备原始分辨率的存档图 */
+  private async captureViaCdp(): Promise<Buffer> {
+    // clip.scale 固定输出倍率，与预览用的 fitScale 解耦——
+    // 无论画面缩放到多小，存档图始终是设备原始分辨率
+    const m = (await this.send('Page.getLayoutMetrics', {}, 5000)) as {
+      cssVisualViewport?: { pageX: number; pageY: number }
+      visualViewport?: { pageX: number; pageY: number }
+    }
+    const vp = m.cssVisualViewport ?? m.visualViewport ?? { pageX: 0, pageY: 0 }
+    const res = (await this.send(
+      'Page.captureScreenshot',
+      {
+        format: 'png',
+        captureBeyondViewport: false,
+        clip: {
+          x: vp.pageX,
+          y: vp.pageY,
+          width: this.device!.width,
+          height: this.device!.height,
+          scale: 1,
+        },
+      },
+      20000
+    )) as { data: string }
+    return Buffer.from(res.data, 'base64')
+  }
+
+  private expectedShotSize(): string {
+    const d = this.device!
+    return `${Math.round(d.width * d.deviceScaleFactor)}×${Math.round(d.height * d.deviceScaleFactor)}`
+  }
+
+  /** 输出与「设备逻辑尺寸 × 像素比」任一维偏差超过 2% 即判为几何错位 */
+  private badShotSize(img: NativeImage): boolean {
+    const d = this.device
+    if (!d) return false
+    const { width, height } = img.getSize()
+    // 空图不在这里管，交给后面的空图检查报错
+    if (!width || !height) return false
+    const ew = d.width * d.deviceScaleFactor
+    const eh = d.height * d.deviceScaleFactor
+    return Math.abs(width - ew) > ew * 0.02 || Math.abs(height - eh) > eh * 0.02
   }
 
   /* -------------------------------- 输入 -------------------------------- */
