@@ -1,6 +1,6 @@
 {
   "name": "ui-flow-chart",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "productName": "Flow Chart",
   "description": "AI 驱动的网站功能路径分析工具：自动探索目标站点并生成可缩放的交互流程画布",
   "main": "./out/main/index.js",
