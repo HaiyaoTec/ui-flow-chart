@@ -3,7 +3,10 @@ import { deoverlapLabels } from '@shared/canvas-core/deoverlap'
 import { CARD_W, computeLayout } from '@shared/canvas-core/layout'
 import { routeEdges } from '@shared/canvas-core/routing'
 import { CANVAS_CSS } from '@shared/canvas-core/styles'
-import type { FlowGraph } from '@shared/types'
+import { CH } from '@shared/ipc-contract'
+import type { FlowGraph, GraphPatch } from '@shared/types'
+import { invoke } from '../../ipc'
+import EditPanel from './EditPanel'
 import { usePanZoom } from './usePanZoom'
 import './canvas.css'
 
@@ -15,15 +18,56 @@ interface Props {
   device?: { width: number; height: number }
   /** 探索过程中新出现的节点，用于入场动画与自动跟随 */
   newNodeIds?: string[]
+  /** 会话结束后可修订：选中卡片与标注进行编辑 */
+  editable?: boolean
+  /** 修订产生的补丁交给上层合并进图谱 */
+  onPatch?: (patch: GraphPatch) => void
 }
 
-export default function FlowCanvas({ graph, projectId, device, newNodeIds = [] }: Props) {
+export default function FlowCanvas({ graph, projectId, device, newNodeIds = [], editable = false, onPatch }: Props) {
   const stageRef = useRef<HTMLDivElement>(null)
   const worldRef = useRef<HTMLDivElement>(null)
   const [labelsOn, setLabelsOn] = useState(true)
   const [follow, setFollow] = useState(true)
   const [hiddenLanes, setHiddenLanes] = useState<Set<string>>(new Set())
+  const [selected, setSelected] = useState<{ kind: 'node' | 'edge'; id: string } | null>(null)
+  const [renamingLane, setRenamingLane] = useState<{ id: string; title: string } | null>(null)
+  // 拖拽平移之后也会触发 click，按下位置位移超过阈值就不算选中
+  const downAt = useRef<{ x: number; y: number } | null>(null)
   const inited = useRef(false)
+
+  // 会话重新开跑（不可编辑）时清掉选中态
+  useEffect(() => {
+    if (!editable) {
+      setSelected(null)
+      setRenamingLane(null)
+    }
+  }, [editable])
+
+  const clickNotDrag = (e: React.MouseEvent): boolean => {
+    const d = downAt.current
+    return !d || (Math.abs(e.clientX - d.x) < 5 && Math.abs(e.clientY - d.y) < 5)
+  }
+
+  const select = (kind: 'node' | 'edge', id: string) => (e: React.MouseEvent) => {
+    if (!editable || !clickNotDrag(e)) return
+    e.stopPropagation()
+    setSelected((prev) => (prev?.kind === kind && prev.id === id ? prev : { kind, id }))
+  }
+
+  async function renameLane(): Promise<void> {
+    const target = renamingLane
+    setRenamingLane(null)
+    if (!target) return
+    const current = graph.lanes.find((l) => l.id === target.id)
+    const title = target.title.trim()
+    if (!current || !title || title === current.title) return
+    try {
+      onPatch?.(await invoke(CH.graphUpdateLane, { projectId, id: target.id, title }))
+    } catch {
+      // 会话状态变化等失败场景：保持原名即可，无需打断
+    }
+  }
 
   const layout = useMemo(() => computeLayout(graph, device), [graph, device])
   const edges = useMemo(() => routeEdges(graph.edges, layout), [graph.edges, layout])
@@ -78,7 +122,7 @@ export default function FlowCanvas({ graph, projectId, device, newNodeIds = [] }
   const hidden = (laneId: string) => hiddenLanes.has(laneId)
 
   return (
-    <div className="canvas-root">
+    <div className={`canvas-root${editable ? ' editable' : ''}`}>
       <style>{CANVAS_CSS}</style>
 
       <div className="canvas-toolbar">
@@ -110,16 +154,46 @@ export default function FlowCanvas({ graph, projectId, device, newNodeIds = [] }
       {/* 没有泳道时这一整条是空的，别留一条空白占位 */}
       {graph.lanes.length > 0 && (
         <div className="canvas-lanes">
-          {graph.lanes.map((l) => (
-            <label key={l.id} className="seg">
-              <input type="checkbox" checked={!hidden(l.id)} onChange={() => toggleLane(l.id)} />
-              {l.title}
-            </label>
-          ))}
+          {graph.lanes.map((l) =>
+            renamingLane?.id === l.id ? (
+              <input
+                key={l.id}
+                className="lane-rename"
+                autoFocus
+                value={renamingLane.title}
+                maxLength={40}
+                onChange={(e) => setRenamingLane({ id: l.id, title: e.target.value })}
+                onBlur={() => void renameLane()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void renameLane()
+                  if (e.key === 'Escape') setRenamingLane(null)
+                }}
+              />
+            ) : (
+              <label
+                key={l.id}
+                className="seg"
+                // 会话结束后双击泳道名进入重命名
+                onDoubleClick={() => editable && setRenamingLane({ id: l.id, title: l.title })}
+                title={editable ? '双击重命名' : undefined}
+              >
+                <input type="checkbox" checked={!hidden(l.id)} onChange={() => toggleLane(l.id)} />
+                {l.title}
+              </label>
+            )
+          )}
         </div>
       )}
 
-      <div className="ufc-stage" ref={stageRef}>
+      <div
+        className="ufc-stage"
+        ref={stageRef}
+        onPointerDown={(e) => (downAt.current = { x: e.clientX, y: e.clientY })}
+        onClick={(e) => {
+          // 点空白处取消选中；拖拽平移不算
+          if (editable && clickNotDrag(e)) setSelected(null)
+        }}
+      >
         <div className="ufc-world" ref={worldRef} style={{ width: layout.worldW, height: layout.worldH }}>
           {/* 图谱为空时不画泳道框，否则会出现一个空的灰色方块 */}
           {isEmpty ? null : layout.laneBoxes.map((b) => (
@@ -155,15 +229,19 @@ export default function FlowCanvas({ graph, projectId, device, newNodeIds = [] }
             return (
               <div
                 key={n.id}
-                className={`ufc-card ${n.kind} ${newNodeIds.includes(n.id) ? 'is-new' : ''} ${hidden(n.lane) ? 'ufc-hidden' : ''}`}
+                className={`ufc-card ${n.kind} ${newNodeIds.includes(n.id) ? 'is-new' : ''} ${hidden(n.lane) ? 'ufc-hidden' : ''} ${
+                  selected?.kind === 'node' && selected.id === n.id ? 'is-selected' : ''
+                }`}
                 data-id={n.id}
                 data-lane={n.lane}
                 style={{ left: p.x, top: p.y, width: CARD_W }}
+                onClick={select('node', n.id)}
               >
                 <div className="ufc-head">
                   <div className="ufc-row">
                     <span className="ufc-num">{layout.seqNo.get(n.id)}</span>
                     <span className="ufc-tag">{KIND_LABEL[n.kind] ?? n.kind}</span>
+                    {n.draft && <span className="ufc-tag">未整理</span>}
                   </div>
                   <div className="ufc-title">{n.title}</div>
                   {n.subtitle && <div className="ufc-sub">{n.subtitle}</div>}
@@ -187,11 +265,14 @@ export default function FlowCanvas({ graph, projectId, device, newNodeIds = [] }
               return (
                 <div
                   key={`l-${e.id}`}
-                  className={`ufc-label ${e.type} ${off ? 'ufc-hidden' : ''}`}
+                  className={`ufc-label ${e.type} ${off ? 'ufc-hidden' : ''} ${
+                    selected?.kind === 'edge' && selected.id === e.id ? 'is-selected' : ''
+                  }`}
                   data-anchor={e.anchor}
                   // 标注宽度封顶到 300px，超出部分省略，完整文本靠 title 补上
                   title={e.label}
                   style={{ left: e.lx, top: e.ly }}
+                  onClick={select('edge', e.id)}
                 >
                   {e.label}
                 </div>
@@ -201,6 +282,16 @@ export default function FlowCanvas({ graph, projectId, device, newNodeIds = [] }
       </div>
 
       {isEmpty && <div className="canvas-empty">还没有界面。启动探索后，每发现一屏就会实时出现在这里。</div>}
+
+      {editable && selected && onPatch && (
+        <EditPanel
+          projectId={projectId}
+          graph={graph}
+          selected={selected}
+          onPatch={onPatch}
+          onClose={() => setSelected(null)}
+        />
+      )}
     </div>
   )
 }

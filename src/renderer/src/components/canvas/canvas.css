@@ -68,3 +68,73 @@ label.seg input {
   font-size: 13px;
   pointer-events: none;
 }
+
+/* ------------------------------- 图谱修订 ------------------------------- */
+
+/* 会话结束后卡片与标注可选中修订 */
+.canvas-root.editable .ufc-card,
+.canvas-root.editable .ufc-label {
+  cursor: pointer;
+}
+.canvas-root .ufc-card.is-selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.canvas-root .ufc-label.is-selected {
+  outline: 2px solid var(--accent);
+}
+
+/* 泳道开关条上的内联重命名 */
+.canvas-lanes input.lane-rename {
+  width: 110px;
+  min-height: var(--ctl-h-sm);
+  font-size: 12px;
+}
+
+.ufc-editpanel {
+  position: absolute;
+  top: calc(var(--toolbar-h) * 2 + 10px);
+  right: 12px;
+  z-index: 30;
+  width: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  font-size: 12.5px;
+}
+.ufc-editpanel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+}
+.ufc-editpanel-close {
+  min-height: var(--ctl-h-sm);
+  padding: 0 8px;
+}
+.ufc-editpanel label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--muted);
+}
+.ufc-editpanel input,
+.ufc-editpanel select {
+  width: 100%;
+  min-height: var(--ctl-h-sm);
+  font-size: 12.5px;
+}
+.ufc-editpanel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+.ufc-editpanel-actions .grow {
+  flex: 1;
+}

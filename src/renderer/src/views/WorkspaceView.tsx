@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { getDevice } from '@shared/devices'
 import { CH } from '@shared/ipc-contract'
+import { SESSION_ACTIVE } from '@shared/types'
 import FlowCanvas from '../components/canvas/FlowCanvas'
 import { useDialog } from '../components/Dialog'
 import Icon from '../components/Icon'
@@ -32,7 +33,7 @@ interface Props {
 }
 
 export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
-  const { project, graph, newNodeIds, previewBound, setSession } = useApp()
+  const { project, graph, newNodeIds, previewBound, setSession, applyPatch } = useApp()
   // 会话与日志都按项目取：另外几个项目可能正在后台跑，取错就会显示成别人的进度
   const session = useApp((s) => sessionOf(s, project?.id))
   const logs = useApp((s) => (project ? (s.logsByProject[project.id] ?? EMPTY_LOGS) : EMPTY_LOGS))
@@ -41,6 +42,7 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
   // 会话在主进程里是全局单例。别的项目在跑时，这里不能拿它的状态来渲染
   // ——否则工作台会显示成「正在探索」，按钮也变成暂停/结束，操作的却是另一个项目
   const [exporting, setExporting] = useState('')
+  const [refining, setRefining] = useState(false)
   const [previewWidth, setPreviewWidth] = useState(DEFAULT_PREVIEW)
   // 收起状态记在本地，下次进来还是上次的选择
   const [logOpen, setLogOpen] = useState(() => localStorage.getItem('ufc.logOpen') !== '0')
@@ -117,6 +119,8 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
   const waitingHuman = state === 'awaiting_human'
   // 排队态在打开着的项目里只会短暂出现（打开即申请前台并转入录制），但按钮不能缺位
   const queuedHuman = state === 'human_queued'
+  // 会话结束后图谱开放修订；进行中（含暂停）不行——会话的内存图谱随步落盘，并行改会互相覆盖
+  const editable = !SESSION_ACTIVE.includes(state)
   const device = getDevice(project.deviceId, project.customDevice)
   const bodyWidth = bodyRef.current?.clientWidth ?? 0
   const logCollapsed = bodyWidth > 0 && previewWidth / bodyWidth >= LOG_COLLAPSE_RATIO
@@ -127,6 +131,19 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
     } catch (e) {
       // 最常见的是「另一个项目还在跑」——会话与预览都是全局单例，同一时刻只能有一个
       await dialog.alert({ title: '无法开始探索', message: e instanceof Error ? e.message : String(e) })
+    }
+  }
+
+  async function doRefine() {
+    setRefining(true)
+    try {
+      const r = await invoke(CH.graphRefine, { projectId: project!.id })
+      applyPatch(r.patch)
+      await dialog.alert({ title: '重新生成图谱', message: r.summary })
+    } catch (e) {
+      await dialog.alert({ title: '重新生成失败', message: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setRefining(false)
     }
   }
 
@@ -200,6 +217,12 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
             结束
           </button>
         )}
+        {/* 会话结束后可整体重新生成语义：命名、泳道、标注、合并；人工修正过的字段保留 */}
+        {editable && graph.nodes.length > 0 && (
+          <button disabled={refining} onClick={() => void doRefine()} title="批量补齐界面命名、泳道划分与连线标注；你手动改过的内容保留">
+            {refining ? '生成中…' : '重新生成图谱'}
+          </button>
+        )}
         {/* 导出是低频操作，两个并排的按钮太占位，收进一个菜单 */}
         <Select
           className="export-select"
@@ -244,7 +267,14 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
         style={{ gridTemplateColumns: `minmax(0, 1fr) ${SPLITTER_W}px ${previewWidth}px` }}
       >
         <div className="ws-canvas">
-          <FlowCanvas graph={graph} projectId={project.id} device={device} newNodeIds={newNodeIds} />
+          <FlowCanvas
+            graph={graph}
+            projectId={project.id}
+            device={device}
+            newNodeIds={newNodeIds}
+            editable={editable}
+            onPatch={applyPatch}
+          />
         </div>
 
         <div

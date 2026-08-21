@@ -2,10 +2,11 @@ import { join } from 'node:path'
 import { ipcMain, nativeImage, nativeTheme, shell, type BaseWindow } from 'electron'
 import { CH, type IpcInvokeMap, type InvokeChannel } from '@shared/ipc-contract'
 import { getDevice } from '@shared/devices'
-import type { FlowGraph } from '@shared/types'
+import { SESSION_ACTIVE, type FlowGraph, type FlowLane, type GraphPatch } from '@shared/types'
 import { createAiClient } from '../ai'
 import { GraphStore } from '../engine/graphStore'
 import { preview } from '../engine/previewManager'
+import { describeRefine, refineGraph } from '../engine/refine'
 import { sessions } from '../engine/sessionManager'
 import { exportProjectHtml } from '../export/exportHtml'
 import { exportProjectPng } from '../export/exportPng'
@@ -163,17 +164,131 @@ export function registerIpc(getWindow: () => BaseWindow | null): void {
   handle(CH.updateInstall, ({ force }) => updater.install(Boolean(force)))
 
   /* --------------------------------- 图谱 --------------------------------- */
-  // 一律由调用方显式指名项目：多会话下从「当前会话」反推目标项目会写错对象
+  /*
+   * 一律由调用方显式指名项目：多会话下从「当前会话」反推目标项目会写错对象。
+   *
+   * 人工修正只在会话结束后进行：探索会话持有自己的内存图谱并随步落盘，
+   * 与这里的独立 store 并行写同一份文件会互相覆盖。paused 也算未结束——
+   * 恢复后的下一次落盘同样会把这里的修改抹掉。
+   */
+  const assertEditable = (projectId: string): void => {
+    const state = sessions.snapshot(projectId).state
+    if (SESSION_ACTIVE.includes(state)) throw new Error('探索会话尚未结束，请结束后再修改图谱')
+  }
+
+  /** 编辑后的全量补丁。命名、泳道、重排都可能动大半张图，增量发容易漏 */
+  const fullPatch = (projectId: string, s: GraphStore, extra?: Partial<GraphPatch>): GraphPatch => ({
+    projectId,
+    updatedNodes: s.get().nodes.map((n) => ({ ...n })),
+    updatedEdges: s.get().edges.map((e) => ({ ...e })),
+    meta: s.get().meta,
+    ...extra,
+  })
+
+  /** 人工修正过的字段记入 pinned，重新生成图谱时跳过 */
+  const NODE_EDITABLE = ['title', 'lane', 'kind'] as const
+  const EDGE_EDITABLE = ['label', 'type'] as const
+
   handle(CH.graphUpdateNode, ({ projectId, id, patch }) => {
-    withStore(projectId, (s) => s.updateNode(id, patch as never))
+    assertEditable(projectId)
+    return withStore(projectId, (s) => {
+      const node = s.get().nodes.find((n) => n.id === id)
+      const keys = NODE_EDITABLE.filter((k) => patch[k] !== undefined)
+      if (!node || !keys.length) throw new Error('界面不存在或没有可修改的字段')
+      // 目标泳道可能是用户新建的
+      const addedLanes: FlowLane[] = []
+      if (typeof patch.lane === 'string') {
+        const lane = s.ensureLane(patch.lane, typeof patch.laneTitle === 'string' && patch.laneTitle ? patch.laneTitle : patch.lane)
+        if (lane) addedLanes.push(lane)
+      }
+      const applied: Record<string, unknown> = {}
+      for (const k of keys) applied[k] = patch[k]
+      s.updateNode(id, applied as never)
+      node.pinned = [...new Set([...(node.pinned ?? []), ...keys])]
+      // 人工定过名的界面不再是待整理态
+      if (keys.includes('title')) node.draft = undefined
+      const removedLaneIds = s.pruneEmptyLanes()
+      s.relayout()
+      return fullPatch(projectId, s, {
+        addedLanes: addedLanes.length ? addedLanes : undefined,
+        removedLaneIds: removedLaneIds.length ? removedLaneIds : undefined,
+      })
+    })
   })
+
   handle(CH.graphUpdateEdge, ({ projectId, id, patch }) => {
-    withStore(projectId, (s) => s.updateEdge(id, patch as never))
+    assertEditable(projectId)
+    return withStore(projectId, (s) => {
+      const edge = s.get().edges.find((e) => e.id === id)
+      const keys = EDGE_EDITABLE.filter((k) => patch[k] !== undefined)
+      if (!edge || !keys.length) throw new Error('连线不存在或没有可修改的字段')
+      const applied: Record<string, unknown> = {}
+      for (const k of keys) applied[k] = patch[k]
+      s.updateEdge(id, applied as never)
+      edge.pinned = [...new Set([...(edge.pinned ?? []), ...keys])]
+      return fullPatch(projectId, s)
+    })
   })
+
   handle(CH.graphDeleteNode, ({ projectId, id }) => {
-    withStore(projectId, (s) => s.deleteNode(id))
+    assertEditable(projectId)
+    return withStore(projectId, (s) => {
+      const node = s.get().nodes.find((n) => n.id === id)
+      if (!node) throw new Error('界面不存在')
+      // 记入排除清单：被删界面再次被探索到也不复活
+      s.exclude([node.signatureHash, ...(node.aliasSigs ?? [])])
+      const removedEdgeIds = s
+        .get()
+        .edges.filter((e) => e.from === id || e.to === id)
+        .map((e) => e.id)
+      s.deleteNode(id)
+      const removedLaneIds = s.pruneEmptyLanes()
+      s.relayout()
+      return fullPatch(projectId, s, {
+        removedNodeIds: [id],
+        removedEdgeIds: removedEdgeIds.length ? removedEdgeIds : undefined,
+        removedLaneIds: removedLaneIds.length ? removedLaneIds : undefined,
+      })
+    })
   })
-  handle(CH.graphRelayout, ({ projectId }) => withStore(projectId, (s) => s.relayout()))
+
+  handle(CH.graphDeleteEdge, ({ projectId, id }) => {
+    assertEditable(projectId)
+    return withStore(projectId, (s) => {
+      const removed = s.removeEdges([id])
+      if (!removed.length) throw new Error('连线不存在')
+      s.relayout()
+      return fullPatch(projectId, s, { removedEdgeIds: removed })
+    })
+  })
+
+  handle(CH.graphUpdateLane, ({ projectId, id, title }) => {
+    assertEditable(projectId)
+    return withStore(projectId, (s) => {
+      const lane = s.updateLane(id, { title: title.trim() || id })
+      if (!lane) throw new Error('泳道不存在')
+      return fullPatch(projectId, s, { updatedLanes: [{ ...lane }] })
+    })
+  })
+
+  handle(CH.graphRelayout, ({ projectId }) => {
+    assertEditable(projectId)
+    return withStore(projectId, (s) => s.relayout())
+  })
+
+  /** 手动重新生成图谱：批量补齐语义并整理。人工修正过的字段一律保留 */
+  handle(CH.graphRefine, async ({ projectId }) => {
+    assertEditable(projectId)
+    const meta = getProject(projectId)
+    if (!meta) throw new Error('项目不存在')
+    const ai = createAiClient(meta.aiProfileId)
+    const store = new GraphStore(projectId, meta.targetUrl, meta.deviceId)
+    const r = await refineGraph(store, ai, {
+      onLog: (level, message) => (level === 'warn' ? log.warn : log.info)('refine', message),
+    })
+    store.save()
+    return { summary: describeRefine(r), patch: { projectId, ...r.patch } }
+  })
 
   /* --------------------------------- 导出 --------------------------------- */
   handle(CH.exportHtml, ({ projectId }) => exportProjectHtml(projectId))
