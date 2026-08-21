@@ -17,7 +17,8 @@ export const SYSTEM_PROMPT = `你是一个网站交互流程探索助手。你�
 - 同一界面反复出现说明在绕圈，换一个没试过的入口，或用 back 退出。
 
 填写表单时使用明显的测试数据，禁止编造真实的个人身份信息、真实手机号或邮箱。
-遇到需要真人介入才能推进的环节（登录墙、图形验证码、短信/邮件验证码、支付），输出 need_human 并说明原因，不要尝试绕过。
+只缺一条信息或一个决定就能继续时（需要测试账号、需要用户转述收到的短信验证码、两条路线选哪条），输出 ask 向用户提问：question 写清楚要什么，最多给 4 个 options 供点选，需要自由输入时 allowInput 填 true；应答属于验证码等敏感信息时 sensitive 填 true。禁止向用户索取真实支付信息、证件号码、银行卡号——这类环节输出 need_human 交给用户亲自完成。
+必须真人在页面上操作的环节（图形验证码、拖动滑块、支付确认），输出 need_human 并说明原因，不要尝试绕过。
 当主干路径与关键校验态已覆盖，或没有值得继续探索的新界面时，输出 done。`
 
 function truncate(s: string, n: number): string {
@@ -69,7 +70,7 @@ export const ACTION_JSON_SCHEMA = {
   properties: {
     action: {
       type: 'string',
-      enum: ['click', 'fill', 'scroll', 'back', 'done', 'need_human'],
+      enum: ['click', 'fill', 'scroll', 'back', 'done', 'need_human', 'ask'],
       description: '本步要执行的动作',
     },
     targetIdx: { type: 'integer', description: 'click 与 fill 必填，取自可交互元素清单的编号' },
@@ -77,6 +78,10 @@ export const ACTION_JSON_SCHEMA = {
     scrollDelta: { type: 'integer', description: 'scroll 时的纵向滚动像素，正数向下' },
     reason: { type: 'string', description: '选择该动作的简要理由' },
     needHumanReason: { type: 'string', enum: ['login', 'captcha', 'payment', 'other'] },
+    question: { type: 'string', description: 'ask 必填：向用户提出的问题' },
+    options: { type: 'array', items: { type: 'string' }, description: 'ask 可选：候选选项，最多 4 个' },
+    allowInput: { type: 'boolean', description: 'ask 可选：是否允许自由输入' },
+    sensitive: { type: 'boolean', description: 'ask 可选：应答是否属于验证码等敏感信息，记录会脱敏' },
   },
   required: ['action', 'reason'],
 } as const

@@ -42,7 +42,8 @@
   border-color: var(--accent);
 }
 .state-chip.awaiting_human,
-.state-chip.human_queued {
+.state-chip.human_queued,
+.state-chip.asking {
   color: var(--branch);
   border-color: var(--branch);
 }
@@ -58,6 +59,31 @@
   padding: 10px 14px;
   background: color-mix(in srgb, var(--branch) 14%, transparent);
   border-bottom: 1px solid var(--branch);
+  font-size: 12.5px;
+}
+
+/* 提问卡片：AI 只缺一条信息，答完即继续，不必接触页面 */
+.ask-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px;
+  background: color-mix(in srgb, var(--branch) 14%, transparent);
+  border-bottom: 1px solid var(--branch);
+  font-size: 12.5px;
+}
+.ask-banner .ask-question {
+  font-size: 13px;
+}
+.ask-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ask-actions input {
+  width: 220px;
+  min-height: var(--ctl-h-sm);
   font-size: 12.5px;
 }
 

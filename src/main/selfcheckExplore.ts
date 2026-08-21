@@ -141,7 +141,17 @@ export async function runExploreCheck(win: BaseWindow, site: string, aiBase: str
     }
 
     // 步数会随页面时序浮动，收尾整理又要多两次 AI 往返，等宽一点，免得把「还在跑」误判成失败
-    let snap = await waitFor(['finished', 'failed', 'paused', 'awaiting_human'], 180_000)
+    let snap = await waitFor(['finished', 'failed', 'paused', 'awaiting_human', 'asking'], 180_000)
+
+    /*
+     * ask 场景：mock 在起步向用户确认探索方向。这里替用户作答，
+     * 验证「提问 → 应答 → 模型依据回答继续」的整条链路。
+     */
+    if (scenario === 'ask' && snap.state === 'asking') {
+      out.ask = snap.ask
+      sessions.answerAsk(projectId, '注册流程')
+      snap = await waitFor(['finished', 'failed', 'paused', 'awaiting_human'], 180_000)
+    }
 
     if (takeover && snap.state === 'awaiting_human') {
       out.needHuman = snap.reason
@@ -208,7 +218,36 @@ export async function runExploreCheck(win: BaseWindow, site: string, aiBase: str
         }
       : null
 
-    out.assertions = { failed: checkGraph(graph, snap.state, takeover, aiReview) }
+    const failed = checkGraph(graph, snap.state, takeover, aiReview)
+
+    /*
+     * ask 场景的链路断言：问题与应答都要留痕。
+     * 应答内容是非敏感的，落盘必须原文可审计；提问期不该建录制器，
+     * 图上也不该出现人工录制的界面。
+     */
+    if (scenario === 'ask') {
+      const { readFileSync: rf, existsSync: ex } = await import('node:fs')
+      const sj = join(projectDir(project.id), 'session.jsonl')
+      const rows = ex(sj)
+        ? rf(sj, 'utf8')
+            .trim()
+            .split('\n')
+            .map((l) => {
+              try {
+                return JSON.parse(l) as Record<string, unknown>
+              } catch {
+                return {}
+              }
+            })
+        : []
+      if (!rows.some((r) => r.kind === 'ask')) failed.push('没有发起提问，本轮没验到 ask 链路')
+      const answer = rows.find((r) => r.kind === 'ask-answer' && r.answered === true)
+      if (!answer) failed.push('应答没有落盘')
+      else if (answer.answer !== '注册流程') failed.push(`非敏感应答应原文落盘，实际：${String(answer.answer)}`)
+      if (graph?.nodes.some((n) => n.createdBy === 'human')) failed.push('提问不该触发录制，图上不该有人工录制界面')
+    }
+
+    out.assertions = { failed }
 
     // 结束时页面上的表单状态，便于定位「为什么提交没通过」
     out.finalPage = await preview.driver

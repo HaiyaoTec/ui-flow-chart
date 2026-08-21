@@ -74,12 +74,12 @@ class SessionManager {
     }
   }
 
-  /** 正在等人（排队或已在录制）的项目名 */
+  /** 正在等人（排队、录制中或等回答）的项目名 */
   private waitingHumanNames(): Set<string> {
     const names = new Set<string>()
     for (const [id, s] of this.sessions) {
       const st = s.snapshot().state
-      if (st === 'awaiting_human' || st === 'human_queued') names.add(getProject(id)?.name ?? id)
+      if (st === 'awaiting_human' || st === 'human_queued' || st === 'asking') names.add(getProject(id)?.name ?? id)
     }
     return names
   }
@@ -171,6 +171,8 @@ class SessionManager {
       emit: (event, snapshot) => {
         this.send(CH.evSession, { ...event, snapshot })
         if (event.kind === 'need-human') this.alertHuman(meta.name, event.reason)
+        // 提问同样要主动叫人：探索在后台跑，不提醒就会一直干等
+        if (event.kind === 'ask') this.alertHuman(meta.name, `需要你回答：${event.ask.question}`)
         if (event.kind === 'finished') this.notify(`${meta.name} 探索完成`, `共 ${snapshot.screens} 屏、${snapshot.step} 步`)
         // 状态每变一次就落盘一次：会话只活在内存里，
         // 不落盘的话退出应用后项目列表就再也不知道上次跑到哪了
@@ -231,6 +233,9 @@ class SessionManager {
   }
   async takeoverEnd(projectId: string): Promise<SessionSnapshot> {
     return (await this.sessions.get(projectId)?.takeoverEnd()) ?? this.noSession('takeover-end', projectId)
+  }
+  answerAsk(projectId: string, answer: string): SessionSnapshot {
+    return this.sessions.get(projectId)?.answerAsk(answer) ?? this.noSession('ask-answer', projectId)
   }
 
   /** 停掉全部会话。应用内更新要重启时用 */

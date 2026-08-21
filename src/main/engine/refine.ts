@@ -36,6 +36,11 @@ const GLOBAL_MAX_NEW_LANES = 6
 export interface RefineOptions {
   /** 跳过全部模型问询，只做确定性整理（停止与崩溃路径） */
   skipAi?: boolean
+  /**
+   * 只处理这些节点：接管段的局部生成。命名与泳道候选限定于此，
+   * 合并与标注语义化跳过（那是全局问题，留给收尾的全局生成）。
+   */
+  scope?: string[]
   /** 每次问询前创建新的中断信号 */
   signalOf?: () => AbortSignal
   /** 用户是否已要求停止；true 时放弃剩余问询 */
@@ -106,10 +111,12 @@ export async function refineGraph(store: GraphStore, ai: IAiClient, opts: Refine
     .nodes.reduce((n, x) => n + (x.pinned?.length ?? 0), 0) +
     store.get().edges.reduce((n, x) => n + (x.pinned?.length ?? 0), 0)
 
+  const inScope = (id: string): boolean => !opts.scope || opts.scope.includes(id)
+
   /* ---------- 一、界面命名。draft 且标题未被人工锁定的节点，分批 ---------- */
   {
     const graph = store.get()
-    const targets = graph.nodes.filter((n) => n.draft && !n.pinned?.includes('title')).map((n) => n.id)
+    const targets = graph.nodes.filter((n) => n.draft && !n.pinned?.includes('title') && inScope(n.id)).map((n) => n.id)
     for (let i = 0; i < targets.length; i += NAME_BATCH) {
       const batch = targets.slice(i, i + NAME_BATCH)
       const out = await ask(buildNameScreensTask(graph, batch), '界面命名')
@@ -129,7 +136,7 @@ export async function refineGraph(store: GraphStore, ai: IAiClient, opts: Refine
 
   /* ---------- 二、同界面合并。同地址、不同签名的相邻对，逐对判定 ---------- */
   const removedNodeIds: string[] = []
-  {
+  if (!opts.scope) {
     const graph = store.get()
     const byUrl = new Map<string, FlowNode[]>()
     for (const n of graph.nodes) {
@@ -170,7 +177,7 @@ export async function refineGraph(store: GraphStore, ai: IAiClient, opts: Refine
   const verdict: AiVerdict = {}
   {
     const graph = store.get()
-    const candidates = graph.nodes.filter((n) => !n.pinned?.includes('lane')).map((n) => n.id)
+    const candidates = graph.nodes.filter((n) => !n.pinned?.includes('lane') && inScope(n.id)).map((n) => n.id)
     if (candidates.length) {
       // 回落值：人工接管节点沿连线继承，其余按机械泳道保持现状
       const inherited = inheritLanes(graph)
@@ -191,7 +198,7 @@ export async function refineGraph(store: GraphStore, ai: IAiClient, opts: Refine
   }
 
   /* ---------- 四、标注语义化。未锁定标注的连线，上限之内一批 ---------- */
-  {
+  if (!opts.scope) {
     const graph = store.get()
     const targets = graph.edges
       .filter((e) => !e.pinned?.includes('label'))

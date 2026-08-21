@@ -35,6 +35,7 @@ export const CH = {
   sessionStop: 'session:stop',
   sessionTakeoverStart: 'session:takeover:start',
   sessionTakeoverEnd: 'session:takeover:end',
+  sessionAnswerAsk: 'session:answer-ask',
   sessionSnapshot: 'session:snapshot',
   sessionList: 'session:list',
 
@@ -204,6 +205,8 @@ export interface IpcInvokeMap {
   [CH.sessionStop]: { req: { projectId: string }; res: SessionSnapshot }
   [CH.sessionTakeoverStart]: { req: { projectId: string }; res: SessionSnapshot }
   [CH.sessionTakeoverEnd]: { req: { projectId: string }; res: SessionSnapshot }
+  /** 回答会话面板上的结构化提问 */
+  [CH.sessionAnswerAsk]: { req: { projectId: string; answer: string }; res: SessionSnapshot }
   [CH.sessionSnapshot]: { req: { projectId?: string }; res: SessionSnapshot }
   /** 全部在跑的会话。项目列表与侧边栏据此显示「哪些在探索」 */
   [CH.sessionList]: { req: void; res: SessionSnapshot[] }

@@ -519,7 +519,8 @@ label.field > .hint {
   border-color: var(--accent);
 }
 .state-chip.awaiting_human,
-.state-chip.human_queued {
+.state-chip.human_queued,
+.state-chip.asking {
   color: var(--branch);
   border-color: var(--branch);
 }

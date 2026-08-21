@@ -6,12 +6,16 @@ import type { AiAction } from '@shared/types'
  * 这里只剩动作本身；模型多输出的字段（旧版的 screen / edgeLabel）会被剥掉。
  */
 export const actionSchema = z.object({
-  action: z.enum(['click', 'fill', 'scroll', 'back', 'done', 'need_human']),
+  action: z.enum(['click', 'fill', 'scroll', 'back', 'done', 'need_human', 'ask']),
   targetIdx: z.number().int().nonnegative().optional(),
   value: z.string().max(200).optional(),
   scrollDelta: z.number().int().optional(),
   reason: z.string().min(1).max(500),
   needHumanReason: z.enum(['login', 'captcha', 'payment', 'other']).optional(),
+  question: z.string().max(300).optional(),
+  options: z.array(z.string().min(1).max(60)).max(4).optional(),
+  allowInput: z.boolean().optional(),
+  sensitive: z.boolean().optional(),
 })
 
 export class ActionParseError extends Error {
@@ -79,6 +83,15 @@ function normalize(a: AiAction): AiAction {
   const out = { ...a }
   if (out.action === 'scroll' && !out.scrollDelta) out.scrollDelta = 600
   if (out.action === 'need_human' && !out.needHumanReason) out.needHumanReason = 'other'
+  if (out.action === 'ask') {
+    // 没有问题的提问没法答，退化为整屏接管；没给选项又不许输入的同理放开输入
+    if (!out.question?.trim()) {
+      out.action = 'need_human'
+      out.needHumanReason ??= 'other'
+    } else if (!out.options?.length && !out.allowInput) {
+      out.allowInput = true
+    }
+  }
   return out
 }
 

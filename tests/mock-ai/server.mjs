@@ -40,6 +40,8 @@ const progress = new Map()
 /** 每个页面已经填过哪些字段 */
 const filled = new Map()
 let callCount = 0
+/** ask 场景只提问一次，应答后走正常流程 */
+let askAsked = false
 
 /** 从提示文本里还原可交互元素清单 */
 function parseElements(text) {
@@ -74,6 +76,17 @@ function decide(text) {
   progress.set(path, step + 1)
 
   const screen = (id, title, lane, laneTitle, kind = 'normal') => ({ id, title, lane, laneTitle, kind })
+
+  // ask 场景：起步先向用户确认探索方向，应答会出现在下一步的「上一步结果」里
+  if (SCENARIO === 'ask' && (path === '/' || path.endsWith('index.html')) && !askAsked) {
+    askAsked = true
+    return {
+      action: 'ask',
+      reason: '有两条主路径，先确认用户想覆盖哪条',
+      question: '优先探索哪条路径？',
+      options: ['注册流程', '登录流程'],
+    }
+  }
 
   if (path === '/' || path.endsWith('index.html')) {
     // 注册流程已经走过一轮就收敛，避免在首页与注册页之间来回打转

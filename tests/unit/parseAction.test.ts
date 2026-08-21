@@ -57,6 +57,18 @@ describe('parseAction', () => {
     expect(a.needHumanReason).toBe('other')
   })
 
+  it('ask 缺 question 时退化为整屏接管', () => {
+    const a = parseAction(JSON.stringify({ action: 'ask', reason: 'x' }))
+    expect(a.action).toBe('need_human')
+    expect(a.needHumanReason).toBe('other')
+  })
+
+  it('ask 没给选项也不许输入时放开自由输入，否则无法作答', () => {
+    const a = parseAction(JSON.stringify({ action: 'ask', reason: 'x', question: '用哪个账号？' }))
+    expect(a.action).toBe('ask')
+    expect(a.allowInput).toBe(true)
+  })
+
   it('工具调用参数走对象校验', () => {
     expect(parseActionObject(valid).reason).toBe('进入注册')
     expect(() => parseActionObject({ action: 'nope' })).toThrow(ActionParseError)

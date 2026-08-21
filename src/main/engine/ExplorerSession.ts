@@ -4,6 +4,7 @@ import {
   MANUAL_LANE_ID,
   MANUAL_LANE_TITLE,
   type AiAction,
+  type AskRequest,
   type FlowEdge,
   type FlowLane,
   type FlowNode,
@@ -43,7 +44,7 @@ export interface SessionDeps {
 const RUNNING_STATES: SessionState[] = ['launching', 'observing', 'thinking', 'acting', 'resuming', 'finishing']
 
 type BudgetKey = 'steps' | 'aiCalls' | 'screens' | 'duration'
-type ControlOp = 'pause' | 'resume' | 'stop' | 'takeover-start' | 'takeover-end'
+type ControlOp = 'pause' | 'resume' | 'stop' | 'takeover-start' | 'takeover-end' | 'ask-answer'
 
 const MAX_PARSE_RETRY = 2
 const MAX_SAME_SCREEN_FAILS = 3
@@ -96,6 +97,9 @@ export class ExplorerSession {
   private pauseRequested = false
   private takeoverRequested = false
   private takeoverEndRequested = false
+  /** asking 状态下待回答的问题与已到达的应答 */
+  private pendingAsk: AskRequest | null = null
+  private askAnswer: string | null = null
   /** 本轮是否已经收尾整理过。loop 的正常出口与 catch 分支都会调，只许跑一次 */
   private finalizeDone = false
   private watcher: WatchRecorder | null = null
@@ -154,6 +158,7 @@ export class ExplorerSession {
       currentNodeId: this.currentNodeId ?? undefined,
       runId: this.runId || undefined,
       elapsedMs: this.elapsedMs(),
+      ask: this.pendingAsk ?? undefined,
     }
   }
 
@@ -201,6 +206,8 @@ export class ExplorerSession {
     this.lastOutcome = ''
     this.lastActionKind = ''
     this.lastEdgeLabel = ''
+    this.pendingAsk = null
+    this.askAnswer = null
     this.stopRequested = false
     this.pauseRequested = false
     this.takeoverRequested = false
@@ -293,6 +300,22 @@ export class ExplorerSession {
     this.control('takeover-end', this.state === 'awaiting_human' || this.state === 'human_queued')
     this.takeoverEndRequested = true
     this.watcher?.stop()
+    return this.snapshot()
+  }
+
+  /**
+   * 经方法读取应答，绕开 TS 对 this 属性的控制流收窄——
+   * 应答由 answerAsk 从另一条调用链写入，直接读字段会被推断为恒 null。
+   */
+  private readAskAnswer(): string | null {
+    return this.askAnswer
+  }
+
+  /** 用户对结构化提问的回答。只在 asking 状态下接受 */
+  answerAsk(answer: string): SessionSnapshot {
+    const accepted = this.state === 'asking' && this.pendingAsk !== null && this.askAnswer === null
+    this.control('ask-answer', accepted)
+    if (accepted) this.askAnswer = answer
     return this.snapshot()
   }
 
@@ -452,6 +475,12 @@ export class ExplorerSession {
           this.takeoverRequested = true
           this.reason = `AI 请求人工介入（${action.needHumanReason ?? 'other'}）：${action.reason}`
           this.emit({ kind: 'need-human', reason: this.reason, hint: '请在预览窗口中手动完成，然后点击「结束接管」' })
+          continue
+        }
+        if (action.action === 'ask') {
+          // 只缺一条信息或一个决定：向用户提问并等应答，不必接管屏幕
+          await this.runAsk(action, probe, sig, placed)
+          if (this.stopRequested) break
           continue
         }
 
@@ -752,6 +781,70 @@ export class ExplorerSession {
   private static readonly QUEUE_POLL_MS = 500
 
   /**
+   * 结构化提问：把问题挂到会话面板上等应答。
+   *
+   * 与整屏接管的区别是不占屏幕——不申请前台、不建录制器、不计时长，
+   * 后台项目的提问同样能等；应答作为上一步结果交给模型继续。
+   * 敏感应答（验证码转述）只进内存里的模型上下文，所有落盘记录一律脱敏。
+   */
+  private async runAsk(
+    action: AiAction,
+    probe: ProbeResult,
+    sig: string,
+    placed: { nodeId: string; isNew: boolean }
+  ): Promise<void> {
+    const ask: AskRequest = {
+      question: (action.question ?? '').slice(0, 300),
+      options: action.options?.length ? action.options : undefined,
+      allowInput: action.allowInput,
+      sensitive: action.sensitive,
+    }
+    this.pendingAsk = ask
+    this.askAnswer = null
+    this.record({
+      kind: 'ask',
+      question: ask.question,
+      options: ask.options,
+      allowInput: ask.allowInput,
+      sensitive: ask.sensitive,
+    })
+    this.trace({ step: this.step, url: probe.url, sig, nodeId: placed.nodeId, isNew: placed.isNew, action: 'ask' })
+    // 先置状态再发事件：事件携带的快照里才有 ask 内容
+    this.setState('asking', `需要你回答：${ask.question}`)
+    this.emit({ kind: 'ask', ask })
+
+    let answer: string | null = null
+    while (!this.stopRequested && !this.takeoverRequested && !this.pauseRequested) {
+      answer = this.readAskAnswer()
+      if (answer !== null) break
+      await delay(250)
+    }
+    this.pendingAsk = null
+    this.askAnswer = null
+
+    if (answer === null) {
+      // 停止 / 转接管 / 暂停打断提问：问题作废，各自的后续路径接管状态机
+      this.record({ kind: 'ask-answer', answered: false })
+      return
+    }
+
+    this.record({ kind: 'ask-answer', answered: true, sensitive: ask.sensitive, answer: ask.sensitive ? '«已脱敏»' : answer })
+    this.trace({
+      step: this.step,
+      url: probe.url,
+      sig,
+      nodeId: placed.nodeId,
+      isNew: false,
+      action: 'ask',
+      outcome: ask.sensitive ? '«已脱敏»' : answer,
+    })
+    this.lastOutcome = `你就「${ask.question}」询问了用户，用户的回答：${answer}。请依据这个回答继续。`
+    this.log('info', ask.sensitive ? '已收到回答（敏感内容，记录已脱敏）' : `已收到回答：${answer.slice(0, 60)}`)
+    this.reason = undefined
+    this.setState('observing')
+  }
+
+  /**
    * 人工接管：放开输入屏蔽，被动录制直到用户结束。
    *
    * 屏幕只有一块。后台会话判定需要人工时先进 human_queued 排队——
@@ -818,6 +911,12 @@ export class ExplorerSession {
         nodesAdded: result.nodes.length,
       })
       this.takeoverAt = 0
+
+      // 接管段即时收敛：该段录到的界面立即命名归位，不等探索收尾。
+      // 用户结束接管后看到的就是整理过的图
+      if (result.nodes.length && !this.stopRequested) {
+        await this.refineSegment(result.nodes.map((n) => n.id))
+      }
 
       // 被抢占：降回排队等用户回来，其余退出路径都结束接管
       if (preempted) continue
@@ -923,6 +1022,35 @@ export class ExplorerSession {
     this.setState('finishing')
     await this.runRefine(false)
     this.toFinished()
+  }
+
+  /**
+   * 接管段的局部图谱生成：只处理该段录到的界面（命名、归位），
+   * 合并与标注语义化留给收尾的全局生成。失败只记日志，不影响接管流程。
+   */
+  private async refineSegment(nodeIds: string[]): Promise<void> {
+    if (!this.store) return
+    try {
+      const r = await refineGraph(this.store, this.deps.ai, {
+        scope: nodeIds,
+        signalOf: () => {
+          this.abort = new AbortController()
+          return this.abort.signal
+        },
+        shouldStop: () => this.stopRequested,
+        canCall: () => this.aiCalls <= this.budgets.maxAiCalls + 12,
+        onAiCall: () => {
+          this.aiCalls += 1
+        },
+        onLog: (level, message) => this.log(level, message),
+      })
+      this.log('info', describeRefine(r).replace('图谱生成完成', '接管段整理完成'))
+      this.deps.emitPatch(r.patch)
+    } catch (e) {
+      this.log('warn', `接管段整理未完成：${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      this.abort = null
+    }
   }
 
   /**

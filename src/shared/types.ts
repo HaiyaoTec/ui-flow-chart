@@ -253,6 +253,7 @@ export const SESSION_ACTIVE: SessionState[] = [
   'thinking',
   'acting',
   'paused',
+  'asking',
   'human_queued',
   'awaiting_human',
   'resuming',
@@ -271,6 +272,8 @@ export type SessionState =
   | 'thinking'
   | 'acting'
   | 'paused'
+  /** 等待用户回答结构化提问。不占屏幕、不建录制器，与 awaiting_human 区分 */
+  | 'asking'
   | 'human_queued'
   | 'awaiting_human'
   | 'resuming'
@@ -308,6 +311,8 @@ export interface SessionSnapshot {
   runId?: string
   /** 本轮实际在跑的时长，暂停与人工接管期间不计 */
   elapsedMs?: number
+  /** asking 状态下待回答的问题，界面据此渲染问题卡片 */
+  ask?: AskRequest
 }
 
 export type SessionEvent =
@@ -317,13 +322,29 @@ export type SessionEvent =
   | { kind: 'ai-action'; step: number; action: AiAction }
   | { kind: 'action-failed'; step: number; error: string }
   | { kind: 'need-human'; reason: string; hint: string }
+  | { kind: 'ask'; ask: AskRequest }
   | { kind: 'log'; level: 'info' | 'warn' | 'error'; message: string }
   | { kind: 'budget'; snapshot: SessionSnapshot }
   | { kind: 'finished'; snapshot: SessionSnapshot }
 
 /* --------------------------------- AI 动作 ------------------------------- */
 
-export type AiActionKind = 'click' | 'fill' | 'scroll' | 'back' | 'done' | 'need_human'
+export type AiActionKind = 'click' | 'fill' | 'scroll' | 'back' | 'done' | 'need_human' | 'ask'
+
+/**
+ * 结构化提问。模型只缺一条信息或一个决定时向用户提问（测试账号、
+ * 短信验证码转述、分支取舍），用户在会话面板上作答即可，不必接触页面；
+ * 必须真人在页面上操作的环节仍走 need_human 整屏接管。
+ */
+export interface AskRequest {
+  question: string
+  /** 候选选项，点击即提交 */
+  options?: string[]
+  /** 允许自由输入 */
+  allowInput?: boolean
+  /** 应答属于敏感信息（验证码等）：只在内存中交给模型使用，落盘一律脱敏 */
+  sensitive?: boolean
+}
 
 export interface AiAction {
   action: AiActionKind
@@ -332,6 +353,11 @@ export interface AiAction {
   value?: string
   scrollDelta?: number
   reason: string
+  /** ask 动作的问题内容 */
+  question?: string
+  options?: string[]
+  allowInput?: boolean
+  sensitive?: boolean
   /**
    * 旧版探索问询要求模型同时命名当前界面。生成流程重划后节点由引擎机械命名、
    * 图谱生成阶段批量补齐语义，这两个字段不再使用；保留声明是为了旧决策录像能照常回放。

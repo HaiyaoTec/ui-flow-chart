@@ -37,8 +37,10 @@ export default function App() {
   useEffect(() => localStorage.setItem('ufc.navOpen', navOpen ? '1' : '0'), [navOpen])
 
   // 任一会话在等人就亮：多个项目可以同时跑，红点是「有事要你处理」而不是某一个项目。
-  // 排队中的（human_queued）同样算——它等的就是用户把项目打开
-  const waitingHuman = Object.values(sessions).some((s) => s.state === 'awaiting_human' || s.state === 'human_queued')
+  // 排队（human_queued）与等回答（asking）同样算——都在等用户
+  const waitingHuman = Object.values(sessions).some(
+    (s) => s.state === 'awaiting_human' || s.state === 'human_queued' || s.state === 'asking'
+  )
 
   return (
     <div className="app">

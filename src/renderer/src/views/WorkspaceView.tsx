@@ -43,6 +43,7 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
   // ——否则工作台会显示成「正在探索」，按钮也变成暂停/结束，操作的却是另一个项目
   const [exporting, setExporting] = useState('')
   const [refining, setRefining] = useState(false)
+  const [askInput, setAskInput] = useState('')
   const [previewWidth, setPreviewWidth] = useState(DEFAULT_PREVIEW)
   // 收起状态记在本地，下次进来还是上次的选择
   const [logOpen, setLogOpen] = useState(() => localStorage.getItem('ufc.logOpen') !== '0')
@@ -119,6 +120,7 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
   const waitingHuman = state === 'awaiting_human'
   // 排队态在打开着的项目里只会短暂出现（打开即申请前台并转入录制），但按钮不能缺位
   const queuedHuman = state === 'human_queued'
+  const asking = state === 'asking'
   // 会话结束后图谱开放修订；进行中（含暂停）不行——会话的内存图谱随步落盘，并行改会互相覆盖
   const editable = !SESSION_ACTIVE.includes(state)
   const device = getDevice(project.deviceId, project.customDevice)
@@ -132,6 +134,13 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
       // 最常见的是「另一个项目还在跑」——会话与预览都是全局单例，同一时刻只能有一个
       await dialog.alert({ title: '无法开始探索', message: e instanceof Error ? e.message : String(e) })
     }
+  }
+
+  async function answerAsk(answer: string) {
+    const text = answer.trim()
+    if (!text) return
+    setAskInput('')
+    setSession(await invoke(CH.sessionAnswerAsk, { projectId: project!.id, answer: text }))
   }
 
   async function doRefine() {
@@ -211,7 +220,7 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
             结束接管
           </button>
         )}
-        {(running || state === 'paused' || waitingHuman || queuedHuman || state === 'finishing') && (
+        {(running || state === 'paused' || waitingHuman || queuedHuman || asking || state === 'finishing') && (
           <button className="danger" onClick={() => void invoke(CH.sessionStop, { projectId: project.id }).then(setSession)}>
             <Icon name="stop" />
             结束
@@ -247,6 +256,40 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
             {otherRunningName ? `「${otherRunningName}」` : '另一个项目'}，本项目的页面暂不会显示。
             结束那边的探索后重新进入本项目即可。
           </span>
+        </div>
+      )}
+
+      {asking && session?.ask && (
+        <div className="ask-banner">
+          <strong>AI 向你提问</strong>
+          <span className="ask-question">{session.ask.question}</span>
+          {session.ask.sensitive && <span className="muted">回答仅用于本次操作，记录会脱敏保存，不会发给模型之外的任何地方。</span>}
+          <div className="ask-actions">
+            {session.ask.options?.map((o) => (
+              <button key={o} onClick={() => void answerAsk(o)}>
+                {o}
+              </button>
+            ))}
+            {session.ask.allowInput && (
+              <>
+                <input
+                  value={askInput}
+                  onChange={(e) => setAskInput(e.target.value)}
+                  placeholder="输入回答…"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void answerAsk(askInput)
+                  }}
+                />
+                <button className="primary" disabled={!askInput.trim()} onClick={() => void answerAsk(askInput)}>
+                  提交
+                </button>
+              </>
+            )}
+            <button onClick={() => void invoke(CH.sessionTakeoverStart, { projectId: project.id }).then(setSession)}>
+              <Icon name="takeover" />
+              我来操作
+            </button>
+          </div>
         </div>
       )}
 
