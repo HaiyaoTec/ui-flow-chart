@@ -64,6 +64,10 @@ export const CH = {
   graphDeleteNode: 'graph:delete-node',
   graphDeleteEdge: 'graph:delete-edge',
   graphUpdateLane: 'graph:update-lane',
+  graphMergeNodes: 'graph:merge-nodes',
+  graphAddEdge: 'graph:add-edge',
+  graphUndo: 'graph:undo',
+  graphUndoDepth: 'graph:undo-depth',
   graphRelayout: 'graph:relayout',
   graphRefine: 'graph:refine',
 
@@ -252,6 +256,16 @@ export interface IpcInvokeMap {
   [CH.graphDeleteNode]: { req: { projectId: string; id: string }; res: GraphPatch }
   [CH.graphDeleteEdge]: { req: { projectId: string; id: string }; res: GraphPatch }
   [CH.graphUpdateLane]: { req: { projectId: string; id: string; title: string }; res: GraphPatch }
+  /** 多选合并：mergeIds 逐个并入 keepId，连线重定向、签名转为别名 */
+  [CH.graphMergeNodes]: { req: { projectId: string; keepId: string; mergeIds: string[] }; res: GraphPatch }
+  /** 手动新建连线。label 缺省为「人工连线」，type 缺省为 link */
+  [CH.graphAddEdge]: {
+    req: { projectId: string; from: string; to: string; label?: string; type?: string }
+    res: GraphPatch
+  }
+  /** 撤销最近一次图谱修订（含重新生成）。patch 为 null 表示没有可撤销的修改 */
+  [CH.graphUndo]: { req: { projectId: string }; res: { patch: GraphPatch | null; depth: number } }
+  [CH.graphUndoDepth]: { req: { projectId: string }; res: { depth: number } }
   [CH.graphRelayout]: { req: { projectId: string }; res: FlowGraph }
   /** 重新生成图谱：批量补齐语义并整理。探索会话未结束时拒绝 */
   [CH.graphRefine]: { req: { projectId: string }; res: { summary: string; patch: GraphPatch } }

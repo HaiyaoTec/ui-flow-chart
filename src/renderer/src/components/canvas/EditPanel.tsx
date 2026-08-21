@@ -19,22 +19,31 @@ const EDGE_TYPE_OPTIONS: Array<{ value: EdgeType; label: string }> = [
   { value: 'link', label: '关联' },
 ]
 
+/** 画布上的选中态：界面卡片支持多选（Ctrl/Cmd 追加），连线单选 */
+export type Selection = { kind: 'node'; ids: string[] } | { kind: 'edge'; id: string }
+
 interface Props {
   projectId: string
   graph: FlowGraph
-  selected: { kind: 'node' | 'edge'; id: string }
+  selected: Selection
   onPatch: (patch: GraphPatch) => void
+  /** 以某个界面为起点进入连线模式 */
+  onStartLink: (fromId: string) => void
   onClose: () => void
 }
 
 /**
  * 图谱修订面板。选中界面卡片或连线标注后出现，改动即存：
  * 每次保存走主进程的编辑通道，被改过的字段记入 pinned，重新生成图谱不覆盖。
+ * 多选（≥2 个界面）时变成合并面板。
  */
-export default function EditPanel({ projectId, graph, selected, onPatch, onClose }: Props) {
+export default function EditPanel({ projectId, graph, selected, onPatch, onStartLink, onClose }: Props) {
   const dialog = useDialog()
-  const node = selected.kind === 'node' ? graph.nodes.find((n) => n.id === selected.id) : undefined
+  const nodeIds = selected.kind === 'node' ? selected.ids : []
+  const node = nodeIds.length === 1 ? graph.nodes.find((n) => n.id === nodeIds[0]) : undefined
+  const multi = nodeIds.length > 1 ? nodeIds.map((id) => graph.nodes.find((n) => n.id === id)).filter((n) => !!n) : []
   const edge = selected.kind === 'edge' ? graph.edges.find((e) => e.id === selected.id) : undefined
+  const [keepId, setKeepId] = useState('')
 
   const [title, setTitle] = useState('')
   const [lane, setLane] = useState('')
@@ -56,9 +65,12 @@ export default function EditPanel({ projectId, graph, selected, onPatch, onClose
       setLabel(edge.label)
       setEdgeType(edge.type)
     }
-  }, [selected.id, selected.kind, node, edge])
+    if (multi.length) setKeepId((prev) => (nodeIds.includes(prev) ? prev : nodeIds[0]))
+    // 依赖用序列化的选中标识：ids 数组每次渲染都是新引用
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected.kind, nodeIds.join(','), selected.kind === 'edge' ? selected.id : '', node, edge])
 
-  if (!node && !edge) return null
+  if (!node && !edge && !multi.length) return null
 
   async function run(fn: () => Promise<GraphPatch>): Promise<void> {
     setBusy(true)
@@ -107,6 +119,21 @@ export default function EditPanel({ projectId, graph, selected, onPatch, onClose
     onClose()
   }
 
+  async function mergeSelected(): Promise<void> {
+    const keeper = graph.nodes.find((n) => n.id === keepId)
+    if (!keeper) return
+    const ok = await dialog.confirm({
+      title: '合并界面',
+      message: `把选中的 ${nodeIds.length} 个界面合并为「${keeper.title}」，其余界面的连线并入它。可撤销。`,
+      confirmText: '合并',
+    })
+    if (!ok) return
+    await run(() =>
+      invoke(CH.graphMergeNodes, { projectId, keepId, mergeIds: nodeIds.filter((id) => id !== keepId) })
+    )
+    onClose()
+  }
+
   async function saveEdge(): Promise<void> {
     if (!label.trim()) return
     await run(() => invoke(CH.graphUpdateEdge, { projectId, id: edge!.id, patch: { label: label.trim(), type: edgeType } }))
@@ -127,11 +154,35 @@ export default function EditPanel({ projectId, graph, selected, onPatch, onClose
   return (
     <div className="ufc-editpanel" onPointerDown={(e) => e.stopPropagation()}>
       <div className="ufc-editpanel-head">
-        <strong>{node ? '修订界面' : '修订连线'}</strong>
+        <strong>{multi.length ? `合并 ${multi.length} 个界面` : node ? '修订界面' : '修订连线'}</strong>
         <button className="ufc-editpanel-close" onClick={onClose} title="关闭">
           ✕
         </button>
       </div>
+
+      {multi.length > 0 && (
+        <>
+          <span className="muted" style={{ fontSize: 12 }}>
+            Ctrl/Cmd 点选可继续增减。合并后其余界面的连线并入保留的界面，被并界面不再出现。
+          </span>
+          <label>
+            保留的界面
+            <select value={keepId} onChange={(e) => setKeepId(e.target.value)}>
+              {multi.map((n) => (
+                <option key={n.id} value={n.id}>
+                  {n.title}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="ufc-editpanel-actions">
+            <span className="grow" />
+            <button className="primary" disabled={busy || !keepId} onClick={() => void mergeSelected()}>
+              合并
+            </button>
+          </div>
+        </>
+      )}
 
       {node && (
         <>
@@ -166,6 +217,9 @@ export default function EditPanel({ projectId, graph, selected, onPatch, onClose
               ))}
             </select>
           </label>
+          <button onClick={() => onStartLink(node.id)} title="以本界面为起点，点击目标界面建立连线">
+            从此界面新建连线
+          </button>
           <div className="ufc-editpanel-actions">
             <button className="danger" disabled={busy} onClick={() => void deleteNode()}>
               删除

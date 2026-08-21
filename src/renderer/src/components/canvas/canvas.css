@@ -83,6 +83,24 @@ label.seg input {
 .canvas-root .ufc-label.is-selected {
   outline: 2px solid var(--accent);
 }
+/* 连线模式：起点高亮为虚线框，顶部悬浮提示 */
+.canvas-root .ufc-card.is-link-source {
+  outline: 2px dashed var(--accent);
+  outline-offset: 2px;
+}
+.link-hint {
+  position: absolute;
+  top: calc(var(--toolbar-h) * 2 + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  padding: 6px 14px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  font-size: 12.5px;
+}
 
 /* 泳道开关条上的内联重命名 */
 .canvas-lanes input.lane-rename {

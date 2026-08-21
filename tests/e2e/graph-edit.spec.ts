@@ -125,6 +125,56 @@ test('画布修订：改名、改标注、删除都落盘，改过的字段记�
     const excluded = (graph as unknown as { excluded?: string[] }).excluded ?? []
     expect(excluded, '被删界面的签名要进排除清单').toContain('sig-s2')
 
+    /* ---------- 撤销：删除整体回退，排除清单一并恢复 ---------- */
+    await window.getByRole('button', { name: '撤销', exact: true }).click()
+    await window.waitForTimeout(800)
+    await expect(window.locator('.ufc-card[data-id="s2"]'), '撤销后被删界面要回到画布').toHaveCount(1)
+    graph = await ipc(window, 'test:graph', project.id)
+    expect(graph.nodes.some((n) => n.id === 's2'), '撤销要写回磁盘').toBe(true)
+    const excludedAfter = (graph as unknown as { excluded?: string[] }).excluded ?? []
+    expect(excludedAfter, '撤销删除后排除清单一并回滚').not.toContain('sig-s2')
+
+    /* ---------- 手动建边：起点面板进入连线模式，点目标界面完成 ---------- */
+    await window.locator('.ufc-card[data-id="s1"]').click()
+    await panel.getByRole('button', { name: '从此界面新建连线' }).click()
+    await expect(window.locator('.link-hint'), '连线模式要有提示').toBeVisible()
+    await window.locator('.ufc-card[data-id="s2"]').click()
+    await window.waitForTimeout(800)
+    const g3 = await ipc<{ edges: Array<{ label: string; createdBy: string; pinned?: string[] }> }>(
+      window,
+      'test:graph',
+      project.id
+    )
+    const manual = g3.edges.find((e) => e.createdBy === 'human')
+    expect(manual?.label, '人工连线要落盘').toBe('人工连线')
+    expect(manual?.pinned, '人工连线整体视为人工修正').toContain('label')
+
+    /* ---------- 多选合并：Ctrl 追加选中，合并后被并界面消失、连线收敛 ---------- */
+    await window.locator('.ufc-card[data-id="s1"]').click()
+    await window.locator('.ufc-card[data-id="s2"]').click({ modifiers: ['Control'] })
+    await expect(panel.locator('.ufc-editpanel-head strong')).toHaveText('合并 2 个界面')
+    await panel.getByRole('button', { name: '合并' }).click()
+    await window.getByRole('button', { name: '合并' }).last().click()
+    await window.waitForTimeout(800)
+
+    await expect(window.locator('.ufc-card[data-id="s2"]')).toHaveCount(0)
+    const g4 = await ipc<{ nodes: Array<{ id: string; aliasSigs?: string[] }>; edges: unknown[] }>(
+      window,
+      'test:graph',
+      project.id
+    )
+    expect(g4.nodes.map((n) => n.id)).toEqual(['s1'])
+    expect(g4.nodes[0].aliasSigs, '被并界面的签名转为保留界面的别名').toContain('sig-s2')
+    expect(g4.edges.length, '合并产生的自环连线要被清掉').toBe(0)
+
+    /* ---------- 撤销合并：整图恢复 ---------- */
+    await window.getByRole('button', { name: '撤销', exact: true }).click()
+    await window.waitForTimeout(800)
+    await expect(window.locator('.ufc-card[data-id="s2"]'), '撤销合并后被并界面要回来').toHaveCount(1)
+    const g5 = await ipc<{ nodes: unknown[]; edges: unknown[] }>(window, 'test:graph', project.id)
+    expect(g5.nodes.length).toBe(2)
+    expect(g5.edges.length, '撤销合并后连线也要恢复').toBe(2)
+
     await window.locator('.sidebar').getByRole('button', { name: /项目/ }).click()
     await window.waitForTimeout(400)
     await ipc(window, 'project:delete', { id: project.id })

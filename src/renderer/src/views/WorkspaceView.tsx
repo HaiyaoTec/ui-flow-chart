@@ -51,6 +51,7 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
   const [exporting, setExporting] = useState('')
   const [refining, setRefining] = useState(false)
   const [askInput, setAskInput] = useState('')
+  const [undoDepth, setUndoDepth] = useState(0)
   const [previewWidth, setPreviewWidth] = useState(DEFAULT_PREVIEW)
   // 收起状态记在本地，下次进来还是上次的选择
   const [logOpen, setLogOpen] = useState(() => localStorage.getItem('ufc.logOpen') !== '0')
@@ -143,6 +144,44 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
     }
   }
 
+  // 打开项目时取回撤销栈深度：栈活在主进程里，切走再切回来仍然可撤
+  useEffect(() => {
+    if (!project) return
+    void invoke(CH.graphUndoDepth, { projectId: project.id })
+      .then((r) => setUndoDepth(r.depth))
+      .catch(() => setUndoDepth(0))
+  }, [project?.id])
+
+  /** 修订补丁统一入口：合并进图谱并累计可撤销深度 */
+  function onGraphEdited(patch: Parameters<typeof applyPatch>[0]) {
+    applyPatch(patch)
+    setUndoDepth((d) => Math.min(d + 1, 30))
+  }
+
+  async function doUndo() {
+    try {
+      const r = await invoke(CH.graphUndo, { projectId: project!.id })
+      if (r.patch) applyPatch(r.patch)
+      setUndoDepth(r.depth)
+    } catch (e) {
+      await dialog.alert({ title: '撤销失败', message: e instanceof Error ? e.message : String(e) })
+    }
+  }
+
+  // Ctrl/Cmd+Z 撤销。输入框里的撤销交给浏览器自己
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'z') return
+      const t = e.target as HTMLElement | null
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return
+      if (!editable || undoDepth <= 0) return
+      e.preventDefault()
+      void doUndo()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+
   async function answerAsk(answer: string) {
     const text = answer.trim()
     if (!text) return
@@ -154,7 +193,7 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
     setRefining(true)
     try {
       const r = await invoke(CH.graphRefine, { projectId: project!.id })
-      applyPatch(r.patch)
+      onGraphEdited(r.patch)
       await dialog.alert({ title: '重新生成图谱', message: r.summary })
     } catch (e) {
       await dialog.alert({ title: '重新生成失败', message: e instanceof Error ? e.message : String(e) })
@@ -231,6 +270,12 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
           <button className="danger" onClick={() => void invoke(CH.sessionStop, { projectId: project.id }).then(setSession)}>
             <Icon name="stop" />
             结束
+          </button>
+        )}
+        {/* 撤销最近一次修订（含重新生成），快照式恢复，Ctrl+Z 同效 */}
+        {editable && undoDepth > 0 && (
+          <button onClick={() => void doUndo()} title="撤销最近一次图谱修订（Ctrl+Z）">
+            撤销
           </button>
         )}
         {/* 会话结束后可整体重新生成语义：命名、泳道、标注、合并；人工修正过的字段保留 */}
@@ -335,7 +380,7 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
             device={device}
             newNodeIds={newNodeIds}
             editable={editable}
-            onPatch={applyPatch}
+            onPatch={onGraphEdited}
           />
         </div>
 

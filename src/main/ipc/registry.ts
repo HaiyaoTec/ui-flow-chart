@@ -2,8 +2,9 @@ import { join } from 'node:path'
 import { ipcMain, nativeImage, nativeTheme, shell, type BaseWindow } from 'electron'
 import { CH, type IpcInvokeMap, type InvokeChannel } from '@shared/ipc-contract'
 import { getDevice } from '@shared/devices'
-import { SESSION_ACTIVE, type FlowGraph, type FlowLane, type GraphPatch } from '@shared/types'
+import { SESSION_ACTIVE, type EdgeType, type FlowGraph, type FlowLane, type GraphPatch } from '@shared/types'
 import { createAiClient } from '../ai'
+import { finalizeGraph } from '../engine/finalize'
 import { GraphStore } from '../engine/graphStore'
 import { preview } from '../engine/previewManager'
 import { describeRefine, refineGraph } from '../engine/refine'
@@ -186,6 +187,33 @@ export function registerIpc(getWindow: () => BaseWindow | null): void {
     ...extra,
   })
 
+  /*
+   * 撤销栈：每次修订（含重新生成）前压入整图快照，弹栈即恢复。
+   * 快照式覆盖所有操作——合并、删除、批量语义生成都能整体回退，
+   * 不必为每类操作写逆操作。只活在内存里：撤销是会话内的工具，重启即清。
+   */
+  const UNDO_DEPTH = 30
+  const undoStacks = new Map<string, string[]>()
+  const pushUndo = (projectId: string, s: GraphStore): void => {
+    const stack = undoStacks.get(projectId) ?? []
+    stack.push(JSON.stringify(s.get()))
+    if (stack.length > UNDO_DEPTH) stack.shift()
+    undoStacks.set(projectId, stack)
+  }
+
+  /** 快照恢复的补丁：增改按恢复态整份下发，被当前态多出来的内容进删除清单 */
+  const restorePatch = (projectId: string, before: FlowGraph, after: FlowGraph): GraphPatch => ({
+    projectId,
+    addedLanes: after.lanes,
+    updatedLanes: after.lanes,
+    updatedNodes: after.nodes,
+    updatedEdges: after.edges,
+    removedNodeIds: before.nodes.filter((n) => !after.nodes.some((x) => x.id === n.id)).map((n) => n.id),
+    removedEdgeIds: before.edges.filter((e) => !after.edges.some((x) => x.id === e.id)).map((e) => e.id),
+    removedLaneIds: before.lanes.filter((l) => !after.lanes.some((x) => x.id === l.id)).map((l) => l.id),
+    meta: after.meta,
+  })
+
   /** 人工修正过的字段记入 pinned，重新生成图谱时跳过 */
   const NODE_EDITABLE = ['title', 'lane', 'kind'] as const
   const EDGE_EDITABLE = ['label', 'type'] as const
@@ -196,6 +224,7 @@ export function registerIpc(getWindow: () => BaseWindow | null): void {
       const node = s.get().nodes.find((n) => n.id === id)
       const keys = NODE_EDITABLE.filter((k) => patch[k] !== undefined)
       if (!node || !keys.length) throw new Error('界面不存在或没有可修改的字段')
+      pushUndo(projectId, s)
       // 目标泳道可能是用户新建的
       const addedLanes: FlowLane[] = []
       if (typeof patch.lane === 'string') {
@@ -223,6 +252,7 @@ export function registerIpc(getWindow: () => BaseWindow | null): void {
       const edge = s.get().edges.find((e) => e.id === id)
       const keys = EDGE_EDITABLE.filter((k) => patch[k] !== undefined)
       if (!edge || !keys.length) throw new Error('连线不存在或没有可修改的字段')
+      pushUndo(projectId, s)
       const applied: Record<string, unknown> = {}
       for (const k of keys) applied[k] = patch[k]
       s.updateEdge(id, applied as never)
@@ -236,6 +266,7 @@ export function registerIpc(getWindow: () => BaseWindow | null): void {
     return withStore(projectId, (s) => {
       const node = s.get().nodes.find((n) => n.id === id)
       if (!node) throw new Error('界面不存在')
+      pushUndo(projectId, s)
       // 记入排除清单：被删界面再次被探索到也不复活
       s.exclude([node.signatureHash, ...(node.aliasSigs ?? [])])
       const removedEdgeIds = s
@@ -256,8 +287,9 @@ export function registerIpc(getWindow: () => BaseWindow | null): void {
   handle(CH.graphDeleteEdge, ({ projectId, id }) => {
     assertEditable(projectId)
     return withStore(projectId, (s) => {
+      if (!s.get().edges.some((e) => e.id === id)) throw new Error('连线不存在')
+      pushUndo(projectId, s)
       const removed = s.removeEdges([id])
-      if (!removed.length) throw new Error('连线不存在')
       s.relayout()
       return fullPatch(projectId, s, { removedEdgeIds: removed })
     })
@@ -266,11 +298,64 @@ export function registerIpc(getWindow: () => BaseWindow | null): void {
   handle(CH.graphUpdateLane, ({ projectId, id, title }) => {
     assertEditable(projectId)
     return withStore(projectId, (s) => {
-      const lane = s.updateLane(id, { title: title.trim() || id })
-      if (!lane) throw new Error('泳道不存在')
+      if (!s.get().lanes.some((l) => l.id === id)) throw new Error('泳道不存在')
+      pushUndo(projectId, s)
+      const lane = s.updateLane(id, { title: title.trim() || id })!
       return fullPatch(projectId, s, { updatedLanes: [{ ...lane }] })
     })
   })
+
+  handle(CH.graphMergeNodes, ({ projectId, keepId, mergeIds }) => {
+    assertEditable(projectId)
+    return withStore(projectId, (s) => {
+      const ids = [...new Set(mergeIds)].filter((id) => id !== keepId)
+      const nodes = s.get().nodes
+      if (!nodes.some((n) => n.id === keepId)) throw new Error('保留的界面不存在')
+      const missing = ids.filter((id) => !nodes.some((n) => n.id === id))
+      if (!ids.length || missing.length) throw new Error('要合并的界面不存在')
+      pushUndo(projectId, s)
+      for (const id of ids) s.mergeNodes(keepId, id)
+      // 重定向后可能产生自环与重复连线，确定性整理一遍并重排落盘
+      const fin = finalizeGraph(s)
+      return fullPatch(projectId, s, {
+        removedNodeIds: ids,
+        removedEdgeIds: fin.patch.removedEdgeIds,
+        removedLaneIds: fin.patch.removedLaneIds,
+      })
+    })
+  })
+
+  handle(CH.graphAddEdge, ({ projectId, from, to, label, type }) => {
+    assertEditable(projectId)
+    return withStore(projectId, (s) => {
+      const nodes = s.get().nodes
+      if (!nodes.some((n) => n.id === from) || !nodes.some((n) => n.id === to)) throw new Error('连线两端的界面不存在')
+      if (from === to) throw new Error('不能连到界面自身')
+      pushUndo(projectId, s)
+      const edgeType: EdgeType = type === 'primary' || type === 'branch' || type === 'back' ? type : 'link'
+      const edge = s.addEdge(from, to, (label ?? '').trim() || '人工连线', edgeType, 'human')
+      if (!edge) throw new Error('两个界面之间已有同样标注的连线')
+      // 人工建的连线整体视为人工修正，重新生成不改写
+      edge.pinned = ['label', 'type']
+      s.relayout()
+      return fullPatch(projectId, s, { addedEdges: [{ ...edge }] })
+    })
+  })
+
+  handle(CH.graphUndo, ({ projectId }) => {
+    assertEditable(projectId)
+    const stack = undoStacks.get(projectId) ?? []
+    const snap = stack.pop()
+    if (!snap) return { patch: null, depth: 0 }
+    const meta = getProject(projectId)
+    if (!meta) throw new Error('项目不存在')
+    const before = new GraphStore(projectId, meta.targetUrl, meta.deviceId).get()
+    const after = JSON.parse(snap) as FlowGraph
+    writeJsonAtomic(join(projectDir(projectId), 'graph.json'), after)
+    return { patch: restorePatch(projectId, before, after), depth: stack.length }
+  })
+
+  handle(CH.graphUndoDepth, ({ projectId }) => ({ depth: (undoStacks.get(projectId) ?? []).length }))
 
   handle(CH.graphRelayout, ({ projectId }) => {
     assertEditable(projectId)
@@ -284,6 +369,8 @@ export function registerIpc(getWindow: () => BaseWindow | null): void {
     if (!meta) throw new Error('项目不存在')
     const ai = createAiClient(meta.aiProfileId)
     const store = new GraphStore(projectId, meta.targetUrl, meta.deviceId)
+    // 重新生成动的是整张图，同样要能一步撤回
+    pushUndo(projectId, store)
     const r = await refineGraph(store, ai, {
       onLog: (level, message) => (level === 'warn' ? log.warn : log.info)('refine', message),
     })

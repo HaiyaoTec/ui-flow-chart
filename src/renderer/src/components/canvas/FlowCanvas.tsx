@@ -5,8 +5,9 @@ import { routeEdges } from '@shared/canvas-core/routing'
 import { CANVAS_CSS } from '@shared/canvas-core/styles'
 import { CH } from '@shared/ipc-contract'
 import type { FlowGraph, GraphPatch } from '@shared/types'
+import { useDialog } from '../Dialog'
 import { invoke } from '../../ipc'
-import EditPanel from './EditPanel'
+import EditPanel, { type Selection } from './EditPanel'
 import { usePanZoom } from './usePanZoom'
 import './canvas.css'
 
@@ -30,8 +31,11 @@ export default function FlowCanvas({ graph, projectId, device, newNodeIds = [], 
   const [labelsOn, setLabelsOn] = useState(true)
   const [follow, setFollow] = useState(true)
   const [hiddenLanes, setHiddenLanes] = useState<Set<string>>(new Set())
-  const [selected, setSelected] = useState<{ kind: 'node' | 'edge'; id: string } | null>(null)
+  const [selected, setSelected] = useState<Selection | null>(null)
   const [renamingLane, setRenamingLane] = useState<{ id: string; title: string } | null>(null)
+  /** 连线模式：已选定起点，等待点击目标界面 */
+  const [linkFrom, setLinkFrom] = useState<string | null>(null)
+  const dialog = useDialog()
   const inited = useRef(false)
 
   // 会话重新开跑（不可编辑）时清掉选中态
@@ -39,8 +43,34 @@ export default function FlowCanvas({ graph, projectId, device, newNodeIds = [], 
     if (!editable) {
       setSelected(null)
       setRenamingLane(null)
+      setLinkFrom(null)
     }
   }, [editable])
+
+  // Esc 退出连线模式
+  useEffect(() => {
+    if (!linkFrom) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setLinkFrom(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [linkFrom])
+
+  async function completeLink(toId: string): Promise<void> {
+    const fromId = linkFrom!
+    setLinkFrom(null)
+    if (toId === fromId) return
+    try {
+      const patch = await invoke(CH.graphAddEdge, { projectId, from: fromId, to: toId })
+      onPatch?.(patch)
+      // 建完直接选中新连线，紧接着就能改标注与类型
+      const created = patch.addedEdges?.[0]
+      if (created) setSelected({ kind: 'edge', id: created.id })
+    } catch (e) {
+      await dialog.alert({ title: '新建连线失败', message: e instanceof Error ? e.message : String(e) })
+    }
+  }
 
   async function renameLane(): Promise<void> {
     const target = renamingLane
@@ -61,18 +91,31 @@ export default function FlowCanvas({ graph, projectId, device, newNodeIds = [], 
   const isEmpty = layout.positions.size === 0
   const { zoom, zoomAt, fit, fitWidth, reset, focusNode } = usePanZoom(stageRef, worldRef, {
     // 平移手势会吃掉原生 click，点选由手势层在「按下抬起无位移」时合成
-    onTap: (target) => {
+    onTap: (target, ev) => {
       if (!editable) return
       const card = target.closest('.ufc-card') as HTMLElement | null
       if (card?.dataset.id) {
         const id = card.dataset.id
-        setSelected((prev) => (prev?.kind === 'node' && prev.id === id ? prev : { kind: 'node', id }))
+        // 连线模式下点卡片就是选目标
+        if (linkFrom) {
+          void completeLink(id)
+          return
+        }
+        // Ctrl / Cmd 追加或移出多选（仅界面卡片）
+        const multi = ev.ctrlKey || ev.metaKey
+        setSelected((prev) => {
+          if (multi && prev?.kind === 'node') {
+            const ids = prev.ids.includes(id) ? prev.ids.filter((x) => x !== id) : [...prev.ids, id]
+            return ids.length ? { kind: 'node', ids } : null
+          }
+          return { kind: 'node', ids: [id] }
+        })
         return
       }
       const label = target.closest('.ufc-label') as HTMLElement | null
       if (label?.dataset.id) {
         const id = label.dataset.id
-        setSelected((prev) => (prev?.kind === 'edge' && prev.id === id ? prev : { kind: 'edge', id }))
+        setSelected({ kind: 'edge', id })
         return
       }
       setSelected(null)
@@ -227,8 +270,8 @@ export default function FlowCanvas({ graph, projectId, device, newNodeIds = [], 
               <div
                 key={n.id}
                 className={`ufc-card ${n.kind} ${newNodeIds.includes(n.id) ? 'is-new' : ''} ${hidden(n.lane) ? 'ufc-hidden' : ''} ${
-                  selected?.kind === 'node' && selected.id === n.id ? 'is-selected' : ''
-                }`}
+                  selected?.kind === 'node' && selected.ids.includes(n.id) ? 'is-selected' : ''
+                } ${linkFrom === n.id ? 'is-link-source' : ''}`}
                 data-id={n.id}
                 data-lane={n.lane}
                 style={{ left: p.x, top: p.y, width: CARD_W }}
@@ -279,12 +322,18 @@ export default function FlowCanvas({ graph, projectId, device, newNodeIds = [], 
 
       {isEmpty && <div className="canvas-empty">还没有界面。启动探索后，每发现一屏就会实时出现在这里。</div>}
 
-      {editable && selected && onPatch && (
+      {linkFrom && <div className="link-hint">正在新建连线：点击目标界面完成，Esc 取消</div>}
+
+      {editable && selected && onPatch && !linkFrom && (
         <EditPanel
           projectId={projectId}
           graph={graph}
           selected={selected}
           onPatch={onPatch}
+          onStartLink={(id) => {
+            setLinkFrom(id)
+            setSelected(null)
+          }}
           onClose={() => setSelected(null)}
         />
       )}

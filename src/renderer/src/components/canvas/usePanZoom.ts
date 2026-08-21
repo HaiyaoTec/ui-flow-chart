@@ -16,11 +16,11 @@ export function usePanZoom(
   worldRef: React.RefObject<HTMLDivElement | null>,
   opts?: {
     /**
-     * 按下与抬起几乎没有位移时视为一次点选，回传按下时的目标元素。
-     * 平移手势在 pointerdown 上 preventDefault，浏览器因此不派发 click，
-     * 画布上的点选只能在这里合成。
+     * 按下与抬起几乎没有位移时视为一次点选，回传按下时的目标元素与抬起事件
+     * （多选要读修饰键）。平移手势在 pointerdown 上 preventDefault，
+     * 浏览器因此不派发 click，画布上的点选只能在这里合成。
      */
-    onTap?: (target: HTMLElement) => void
+    onTap?: (target: HTMLElement, ev: PointerEvent) => void
   }
 ) {
   const view = useRef<View>({ k: 1, x: 40, y: 68 })
@@ -152,7 +152,7 @@ export function usePanZoom(
     const onPointerUp = (e: PointerEvent) => {
       const d = drag.current
       if (d && e.pointerId === d.id && e.button === 0 && d.target) {
-        if (Math.abs(e.clientX - d.sx) < 5 && Math.abs(e.clientY - d.sy) < 5) tapRef.current?.(d.target)
+        if (Math.abs(e.clientX - d.sx) < 5 && Math.abs(e.clientY - d.sy) < 5) tapRef.current?.(d.target, e)
       }
       endDrag()
     }
