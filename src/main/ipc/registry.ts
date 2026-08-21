@@ -11,7 +11,7 @@ import { sessions } from '../engine/sessionManager'
 import { exportProjectHtml } from '../export/exportHtml'
 import { exportProjectPng } from '../export/exportPng'
 import { deleteProfile, listProfiles, saveProfile } from '../store/credentials'
-import { projectDir, readJson } from '../store/paths'
+import { projectDir, readJson, writeJsonAtomic } from '../store/paths'
 import {
   clearProjectSession,
   createProject,
@@ -332,6 +332,10 @@ function registerTestHooks(getWindow: () => BaseWindow | null): void {
   )
   ipcMain.handle('test:wait-stable', async () => preview.driver.waitStable())
   ipcMain.handle('test:graph', async (_e, projectId: string) => loadGraph(projectId))
+  /** 直接落一份图谱，用于验证修订界面：不必真跑一轮探索才有节点可编辑 */
+  ipcMain.handle('test:seed-graph', async (_e, p: { projectId: string; graph: FlowGraph }) => {
+    writeJsonAtomic(join(projectDir(p.projectId), 'graph.json'), p.graph)
+  })
   ipcMain.handle('test:preview-debug', async () => preview.debugInfo())
   /**
    * 抓一张存档图并回报尺寸与若干采样点的颜色。

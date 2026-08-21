@@ -11,11 +11,25 @@ interface View {
  * transform 直接写 DOM，不走 React 状态——拖拽时每帧 setState 会掉帧。
  * 仅把缩放比例同步回 React 供工具栏显示。
  */
-export function usePanZoom(stageRef: React.RefObject<HTMLDivElement | null>, worldRef: React.RefObject<HTMLDivElement | null>) {
+export function usePanZoom(
+  stageRef: React.RefObject<HTMLDivElement | null>,
+  worldRef: React.RefObject<HTMLDivElement | null>,
+  opts?: {
+    /**
+     * 按下与抬起几乎没有位移时视为一次点选，回传按下时的目标元素。
+     * 平移手势在 pointerdown 上 preventDefault，浏览器因此不派发 click，
+     * 画布上的点选只能在这里合成。
+     */
+    onTap?: (target: HTMLElement) => void
+  }
+) {
   const view = useRef<View>({ k: 1, x: 40, y: 68 })
   const [zoom, setZoom] = useState(1)
   const spaceDown = useRef(false)
-  const drag = useRef<{ sx: number; sy: number; ox: number; oy: number; id: number } | null>(null)
+  const drag = useRef<{ sx: number; sy: number; ox: number; oy: number; id: number; target: HTMLElement | null } | null>(null)
+  // 始终指向最新回调，事件监听只挂一次也能拿到最新的 editable 状态
+  const tapRef = useRef(opts?.onTap)
+  tapRef.current = opts?.onTap
 
   const apply = useCallback(() => {
     const w = worldRef.current
@@ -101,7 +115,15 @@ export function usePanZoom(stageRef: React.RefObject<HTMLDivElement | null>, wor
       if (document.body.classList.contains('ufc-selectable') && e.button === 0 && !spaceDown.current && target.closest('.ufc-head'))
         return
       e.preventDefault()
-      drag.current = { sx: e.clientX, sy: e.clientY, ox: view.current.x, oy: view.current.y, id: e.pointerId }
+      drag.current = {
+        sx: e.clientX,
+        sy: e.clientY,
+        ox: view.current.x,
+        oy: view.current.y,
+        id: e.pointerId,
+        // 捕获后续事件的目标都会变成 stage，点选命中要用按下那一刻的目标
+        target: e.target instanceof HTMLElement ? e.target : null,
+      }
       stage.classList.add('grabbing')
       try {
         stage.setPointerCapture(e.pointerId)
@@ -127,6 +149,13 @@ export function usePanZoom(stageRef: React.RefObject<HTMLDivElement | null>, wor
       drag.current = null
       stage.classList.remove('grabbing')
     }
+    const onPointerUp = (e: PointerEvent) => {
+      const d = drag.current
+      if (d && e.pointerId === d.id && e.button === 0 && d.target) {
+        if (Math.abs(e.clientX - d.sx) < 5 && Math.abs(e.clientY - d.sy) < 5) tapRef.current?.(d.target)
+      }
+      endDrag()
+    }
     /*
      * 空格是画布的平移修饰键，但监听挂在 window 上，输入框里的空格也会冒泡上来。
      * 不判来源就 preventDefault 的话，工作台里的地址栏、AI 配置弹窗都打不出空格，
@@ -151,7 +180,7 @@ export function usePanZoom(stageRef: React.RefObject<HTMLDivElement | null>, wor
     stage.addEventListener('dragstart', onDragStart)
     stage.addEventListener('pointerdown', onPointerDown)
     stage.addEventListener('pointermove', onPointerMove)
-    stage.addEventListener('pointerup', endDrag)
+    stage.addEventListener('pointerup', onPointerUp)
     stage.addEventListener('pointercancel', endDrag)
     stage.addEventListener('lostpointercapture', endDrag)
     window.addEventListener('blur', endDrag)
@@ -163,7 +192,7 @@ export function usePanZoom(stageRef: React.RefObject<HTMLDivElement | null>, wor
       stage.removeEventListener('dragstart', onDragStart)
       stage.removeEventListener('pointerdown', onPointerDown)
       stage.removeEventListener('pointermove', onPointerMove)
-      stage.removeEventListener('pointerup', endDrag)
+      stage.removeEventListener('pointerup', onPointerUp)
       stage.removeEventListener('pointercancel', endDrag)
       stage.removeEventListener('lostpointercapture', endDrag)
       window.removeEventListener('blur', endDrag)

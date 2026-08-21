@@ -32,8 +32,6 @@ export default function FlowCanvas({ graph, projectId, device, newNodeIds = [], 
   const [hiddenLanes, setHiddenLanes] = useState<Set<string>>(new Set())
   const [selected, setSelected] = useState<{ kind: 'node' | 'edge'; id: string } | null>(null)
   const [renamingLane, setRenamingLane] = useState<{ id: string; title: string } | null>(null)
-  // 拖拽平移之后也会触发 click，按下位置位移超过阈值就不算选中
-  const downAt = useRef<{ x: number; y: number } | null>(null)
   const inited = useRef(false)
 
   // 会话重新开跑（不可编辑）时清掉选中态
@@ -43,17 +41,6 @@ export default function FlowCanvas({ graph, projectId, device, newNodeIds = [], 
       setRenamingLane(null)
     }
   }, [editable])
-
-  const clickNotDrag = (e: React.MouseEvent): boolean => {
-    const d = downAt.current
-    return !d || (Math.abs(e.clientX - d.x) < 5 && Math.abs(e.clientY - d.y) < 5)
-  }
-
-  const select = (kind: 'node' | 'edge', id: string) => (e: React.MouseEvent) => {
-    if (!editable || !clickNotDrag(e)) return
-    e.stopPropagation()
-    setSelected((prev) => (prev?.kind === kind && prev.id === id ? prev : { kind, id }))
-  }
 
   async function renameLane(): Promise<void> {
     const target = renamingLane
@@ -72,7 +59,25 @@ export default function FlowCanvas({ graph, projectId, device, newNodeIds = [], 
   const layout = useMemo(() => computeLayout(graph, device), [graph, device])
   const edges = useMemo(() => routeEdges(graph.edges, layout), [graph.edges, layout])
   const isEmpty = layout.positions.size === 0
-  const { zoom, zoomAt, fit, fitWidth, reset, focusNode } = usePanZoom(stageRef, worldRef)
+  const { zoom, zoomAt, fit, fitWidth, reset, focusNode } = usePanZoom(stageRef, worldRef, {
+    // 平移手势会吃掉原生 click，点选由手势层在「按下抬起无位移」时合成
+    onTap: (target) => {
+      if (!editable) return
+      const card = target.closest('.ufc-card') as HTMLElement | null
+      if (card?.dataset.id) {
+        const id = card.dataset.id
+        setSelected((prev) => (prev?.kind === 'node' && prev.id === id ? prev : { kind: 'node', id }))
+        return
+      }
+      const label = target.closest('.ufc-label') as HTMLElement | null
+      if (label?.dataset.id) {
+        const id = label.dataset.id
+        setSelected((prev) => (prev?.kind === 'edge' && prev.id === id ? prev : { kind: 'edge', id }))
+        return
+      }
+      setSelected(null)
+    },
+  })
 
   // 版面变化后立刻做一次去重叠；用真实渲染矩形判定，所以必须在布局阶段跑。
   // 泳道显隐也要重跑：可见标注的集合变了，而 layout/edges 的引用没变，
@@ -185,15 +190,7 @@ export default function FlowCanvas({ graph, projectId, device, newNodeIds = [], 
         </div>
       )}
 
-      <div
-        className="ufc-stage"
-        ref={stageRef}
-        onPointerDown={(e) => (downAt.current = { x: e.clientX, y: e.clientY })}
-        onClick={(e) => {
-          // 点空白处取消选中；拖拽平移不算
-          if (editable && clickNotDrag(e)) setSelected(null)
-        }}
-      >
+      <div className="ufc-stage" ref={stageRef}>
         <div className="ufc-world" ref={worldRef} style={{ width: layout.worldW, height: layout.worldH }}>
           {/* 图谱为空时不画泳道框，否则会出现一个空的灰色方块 */}
           {isEmpty ? null : layout.laneBoxes.map((b) => (
@@ -235,7 +232,6 @@ export default function FlowCanvas({ graph, projectId, device, newNodeIds = [], 
                 data-id={n.id}
                 data-lane={n.lane}
                 style={{ left: p.x, top: p.y, width: CARD_W }}
-                onClick={select('node', n.id)}
               >
                 <div className="ufc-head">
                   <div className="ufc-row">
@@ -269,10 +265,10 @@ export default function FlowCanvas({ graph, projectId, device, newNodeIds = [], 
                     selected?.kind === 'edge' && selected.id === e.id ? 'is-selected' : ''
                   }`}
                   data-anchor={e.anchor}
+                  data-id={e.id}
                   // 标注宽度封顶到 300px，超出部分省略，完整文本靠 title 补上
                   title={e.label}
                   style={{ left: e.lx, top: e.ly }}
-                  onClick={select('edge', e.id)}
                 >
                   {e.label}
                 </div>
