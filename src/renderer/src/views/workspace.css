@@ -92,6 +92,36 @@
   text-decoration: line-through;
   opacity: 0.7;
 }
+/* 暂停态的计划调整：chip 内联小操作钮与行尾添加框 */
+.plan-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.plan-chip-ops {
+  display: inline-flex;
+  gap: 2px;
+}
+.plan-chip-ops button {
+  min-height: 18px;
+  padding: 0 4px;
+  font-size: 11px;
+  line-height: 1;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+}
+.plan-chip-ops button:hover:not(:disabled) {
+  color: var(--fg);
+}
+.plan-chip-ops button:disabled {
+  opacity: 0.3;
+}
+.plan-strip input.plan-add {
+  width: 150px;
+  min-height: var(--ctl-h-sm);
+  font-size: 12px;
+}
 
 /* 提问卡片：AI 只缺一条信息，答完即继续，不必接触页面 */
 .ask-banner {

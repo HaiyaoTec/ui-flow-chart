@@ -161,6 +161,20 @@ export default function AiSettingsPanel() {
             />
             <div className="hint">这段文字会作为 AI 探索时的任务说明，写得越具体，探索路径越贴近你的关注点。</div>
           </label>
+          <label className="field" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <input
+              type="checkbox"
+              style={{ width: 'auto' }}
+              checked={settings.confirmPlan}
+              onChange={(e) => {
+                const next = { ...settings, confirmPlan: e.target.checked }
+                setSettingsState(next)
+                void invoke(CH.settingsSet, { confirmPlan: next.confirmPlan })
+              }}
+            />
+            <span>探索前确认计划</span>
+          </label>
+          <div className="hint">开启后，探索计划生成时会先暂停，你可以增删调整功能入口，点「继续」才开始探索。</div>
         </div>
       )}
 

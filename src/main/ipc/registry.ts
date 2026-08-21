@@ -133,6 +133,7 @@ export function registerIpc(getWindow: () => BaseWindow | null): void {
   handle(CH.sessionTakeoverStart, ({ projectId }) => sessions.takeoverStart(projectId))
   handle(CH.sessionTakeoverEnd, ({ projectId }) => sessions.takeoverEnd(projectId))
   handle(CH.sessionAnswerAsk, ({ projectId, answer }) => sessions.answerAsk(projectId, answer))
+  handle(CH.sessionUpdatePlan, ({ projectId, entries }) => sessions.updatePlan(projectId, entries))
   handle(CH.sessionSnapshot, (req) => sessions.snapshot(req?.projectId))
   handle(CH.sessionList, () => sessions.list())
 

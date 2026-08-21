@@ -34,6 +34,8 @@ export interface SessionDeps {
   ai: IAiClient
   /** 本会话的预览此刻是否占着屏幕。人工接管只有前台才能进行，后台要排队 */
   isFront: () => boolean
+  /** 是否在探索前暂停等用户确认计划（读设置）。缺省不确认，规划完直接开跑 */
+  confirmPlan?: () => boolean
   /** 打开目标站并铺好设备模拟 */
   openTarget: (url: string) => Promise<void>
   /** 抓存档图。走预览管理器而不是 driver：抓图期间要用静帧顶住屏幕区 */
@@ -47,7 +49,7 @@ export interface SessionDeps {
 const RUNNING_STATES: SessionState[] = ['launching', 'observing', 'thinking', 'acting', 'resuming', 'finishing']
 
 type BudgetKey = 'steps' | 'aiCalls' | 'screens' | 'duration'
-type ControlOp = 'pause' | 'resume' | 'stop' | 'takeover-start' | 'takeover-end' | 'ask-answer'
+type ControlOp = 'pause' | 'resume' | 'stop' | 'takeover-start' | 'takeover-end' | 'ask-answer' | 'plan-edit'
 
 const MAX_PARSE_RETRY = 2
 const MAX_SAME_SCREEN_FAILS = 3
@@ -292,6 +294,38 @@ export class ExplorerSession {
     this.stopRequested = true
     this.watcher?.stop()
     this.abort?.abort(new Error('用户结束'))
+    // 暂停态没有循环在跑，没人消费停止标志，就地收束（确定性整理，不再问询）
+    if (this.state === 'paused') void this.finalizeAndFinish()
+    return this.snapshot()
+  }
+
+  /**
+   * 替换探索计划。只在暂停态接受——探索前确认、预算触顶后调整方向都走这里；
+   * 运行中改计划会与正在进行的入口推进互相踩，一律拒绝。
+   */
+  updatePlan(entries: Array<{ title: string; entryText?: string; status?: string }>): SessionSnapshot {
+    const cleaned = entries
+      .map((e) => ({
+        title: (e.title ?? '').trim().slice(0, 40),
+        entryText: e.entryText?.trim().slice(0, 60) || undefined,
+        status: (e.status === 'active' || e.status === 'covered' || e.status === 'abandoned'
+          ? e.status
+          : 'pending') as ExplorePlanEntry['status'],
+      }))
+      .filter((e) => e.title)
+      .slice(0, 8)
+    const accepted = this.state === 'paused' && this.plan !== null && cleaned.length > 0
+    this.control('plan-edit', accepted)
+    if (!accepted) return this.snapshot()
+
+    // 恰保一个探索中的入口：编辑后没有 active 就把第一个待探索的提上来
+    if (!cleaned.some((e) => e.status === 'active')) {
+      const first = cleaned.find((e) => e.status === 'pending')
+      if (first) first.status = 'active'
+    }
+    const plan = cleaned.map((e, i) => ({ id: `p${i + 1}`, ...e }))
+    this.plan = plan
+    this.record({ kind: 'plan-edit', entries: plan.map((x) => ({ id: x.id, title: x.title, status: x.status })) })
     return this.snapshot()
   }
 
@@ -369,6 +403,10 @@ export class ExplorerSession {
         await this.deps.openTarget(project.targetUrl)
         this.log('info', `已打开 ${project.targetUrl}`)
         await this.buildPlan()
+        // 开了确认开关且计划确实生成了才暂停；规划失败没有东西可确认，直接开跑
+        if (this.plan && this.deps.confirmPlan?.()) {
+          return this.toPaused('探索计划已生成，请确认或调整入口后点「继续」开始探索')
+        }
       }
 
       while (!this.stopRequested) {

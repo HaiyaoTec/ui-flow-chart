@@ -51,6 +51,7 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
   const [exporting, setExporting] = useState('')
   const [refining, setRefining] = useState(false)
   const [askInput, setAskInput] = useState('')
+  const [planInput, setPlanInput] = useState('')
   const [undoDepth, setUndoDepth] = useState(0)
   const [previewWidth, setPreviewWidth] = useState(DEFAULT_PREVIEW)
   // 收起状态记在本地，下次进来还是上次的选择
@@ -182,6 +183,38 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
     return () => window.removeEventListener('keydown', onKey)
   })
 
+  /** 把调整后的计划整体传回主进程（保序、带状态），返回的快照即最新计划 */
+  async function submitPlan(entries: Array<{ title: string; entryText?: string; status?: string }>) {
+    if (!entries.length) return
+    try {
+      setSession(await invoke(CH.sessionUpdatePlan, { projectId: project!.id, entries }))
+    } catch (e) {
+      await dialog.alert({ title: '调整计划失败', message: e instanceof Error ? e.message : String(e) })
+    }
+  }
+
+  async function movePlanEntry(index: number, delta: number) {
+    const entries = [...(session?.plan?.entries ?? [])]
+    const target = index + delta
+    if (target < 0 || target >= entries.length) return
+    ;[entries[index], entries[target]] = [entries[target], entries[index]]
+    await submitPlan(entries)
+  }
+
+  async function removePlanEntry(index: number) {
+    const entries = (session?.plan?.entries ?? []).filter((_, i) => i !== index)
+    if (!entries.length) {
+      await dialog.alert({ title: '无法移除', message: '计划至少保留一个入口。不想按计划探索可以直接点「结束」。' })
+      return
+    }
+    await submitPlan(entries)
+  }
+
+  async function addPlanEntry(title: string) {
+    setPlanInput('')
+    await submitPlan([...(session?.plan?.entries ?? []), { title: title.trim() }])
+  }
+
   async function answerAsk(answer: string) {
     const text = answer.trim()
     if (!text) return
@@ -311,15 +344,41 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
         </div>
       )}
 
-      {/* 探索计划：各入口的覆盖状态。规划问询失败时没有计划，这一条不出现 */}
+      {/* 探索计划：各入口的覆盖状态。规划问询失败时没有计划，这一条不出现。
+          暂停态（探索前确认、触顶后调整）下可增删排序，点「继续」按调整后的计划探索 */}
       {session?.plan?.entries.length ? (
         <div className="plan-strip">
-          <span className="muted">探索计划</span>
-          {session.plan.entries.map((e) => (
+          <span className="muted">{state === 'paused' ? '探索计划（可调整）' : '探索计划'}</span>
+          {session.plan.entries.map((e, i) => (
             <span key={e.id} className={`plan-chip ${e.status}`} title={PLAN_STATUS_LABEL[e.status]}>
               {e.title}
+              {state === 'paused' && (
+                <span className="plan-chip-ops">
+                  <button title="前移" disabled={i === 0} onClick={() => void movePlanEntry(i, -1)}>
+                    ‹
+                  </button>
+                  <button title="后移" disabled={i === session.plan!.entries.length - 1} onClick={() => void movePlanEntry(i, 1)}>
+                    ›
+                  </button>
+                  <button title="移除" onClick={() => void removePlanEntry(i)}>
+                    ✕
+                  </button>
+                </span>
+              )}
             </span>
           ))}
+          {state === 'paused' && (
+            <input
+              className="plan-add"
+              placeholder="添加入口，回车确认"
+              value={planInput}
+              maxLength={40}
+              onChange={(e) => setPlanInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && planInput.trim()) void addPlanEntry(planInput)
+              }}
+            />
+          )}
         </div>
       ) : null}
 

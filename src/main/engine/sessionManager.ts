@@ -10,6 +10,7 @@ import {
 import { createAiClient } from '../ai'
 import { log } from '../log'
 import { getProject, partitionOf, touchProject, updateProjectRun } from '../store/projects'
+import { getSettings } from '../store/settings'
 import { ExplorerSession } from './ExplorerSession'
 import { preview } from './previewManager'
 import { getUiContents } from '../window'
@@ -164,6 +165,7 @@ class SessionManager {
       ai,
       // 人工接管只有前台才能进行：屏幕上显示的是不是本项目由 PreviewHost 说了算
       isFront: () => preview.frontProjectId() === meta.id,
+      confirmPlan: () => getSettings().confirmPlan,
       openTarget: async (url) => {
         await preview.open(meta.id, url, getDevice(meta.deviceId, meta.customDevice), partitionOf(meta.id))
       },
@@ -236,6 +238,9 @@ class SessionManager {
   }
   answerAsk(projectId: string, answer: string): SessionSnapshot {
     return this.sessions.get(projectId)?.answerAsk(answer) ?? this.noSession('ask-answer', projectId)
+  }
+  updatePlan(projectId: string, entries: Array<{ title: string; entryText?: string; status?: string }>): SessionSnapshot {
+    return this.sessions.get(projectId)?.updatePlan(entries) ?? this.noSession('plan-edit', projectId)
   }
 
   /** 停掉全部会话。应用内更新要重启时用 */

@@ -449,6 +449,8 @@ export interface AppSettings {
   autoCheckUpdate: boolean
   /** 发现新版本后自动在后台下载（不自动重启） */
   autoDownloadUpdate: boolean
+  /** 探索前先暂停，确认（可调整）探索计划后再开始 */
+  confirmPlan: boolean
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -456,6 +458,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   theme: 'system',
   autoCheckUpdate: true,
   autoDownloadUpdate: true,
+  // 默认自动开跑：强制确认会拉长启动路径，需要把关计划的用户在设置里打开
+  confirmPlan: false,
   defaultDeviceId: 'iphone-14-pro-max',
   defaultGoal: '走通注册与登录的完整流程，覆盖主干路径与关键的表单校验提示界面，并探索忘记密码等找回路径。',
 }

@@ -84,6 +84,7 @@ function makeDeps(opts: {
   tapTo?: (from: string, step: number) => string
   answers: AiAction[]
   planReply?: unknown
+  confirmPlan?: boolean
 }): {
   deps: Deps
   decideInputs: AiDecideInput[]
@@ -130,6 +131,7 @@ function makeDeps(opts: {
     driver: driver as never,
     ai: ai as never,
     isFront: () => true,
+    confirmPlan: () => opts.confirmPlan ?? false,
     openTarget: async () => {},
     captureArchival: async () => ({ png: Buffer.from('x'), jpegBase64: 'eA==' }),
     emit: () => {},
@@ -215,6 +217,57 @@ describe('探索计划', () => {
     const statuses = session.snapshot().plan?.entries.map((e) => e.status)
     expect(statuses?.[0], '停滞的入口标记为已放弃').toBe('abandoned')
     expect(statuses?.[1], '后续入口照常覆盖').toBe('covered')
+  })
+})
+
+describe('探索前确认计划', () => {
+  it('开关开启时规划完先暂停，调整计划后点继续才开始探索', { timeout: 15000 }, async () => {
+    const { deps, decideInputs } = makeDeps({
+      tapTo: () => 'http://site.test/login',
+      answers: [click(1), done],
+      planReply: PLAN_REPLY,
+      confirmPlan: true,
+    })
+    const session: Session = new ExplorerSession(deps)
+    await session.start(metaOf('plan-confirm'), '走通', { maxSteps: 10 })
+
+    // 规划完成即暂停，一步都没探
+    await waitFor(() => session.snapshot().state === 'paused')
+    const snap = session.snapshot()
+    expect(snap.plan?.entries.length).toBe(2)
+    expect(snap.reason).toContain('确认')
+    expect(decideInputs.length, '确认前不该发出任何探索问询').toBe(0)
+
+    // 用户调整：删掉注册流程、只留登录流程
+    const edited = session.updatePlan([{ title: '登录流程', entryText: '登录' }])
+    expect(edited.plan?.entries.map((e) => e.title)).toEqual(['登录流程'])
+
+    session.resume()
+    await waitFor(() => session.snapshot().state === 'finished', 8000)
+    expect(decideInputs[0].subtask, '探索按调整后的计划进行').toBe('登录流程')
+    expect(session.snapshot().plan?.entries.map((e) => e.status)).toEqual(['covered'])
+  })
+
+  it('探索进行中的计划编辑被拒绝', { timeout: 15000 }, async () => {
+    const { deps } = makeDeps({ answers: [done], planReply: PLAN_REPLY })
+    const session: Session = new ExplorerSession(deps)
+    await session.start(metaOf('plan-edit-reject'), '走通', { maxSteps: 10 })
+    // 无确认开关：直接开跑。运行期（非 paused）的编辑不该生效
+    const before = session.snapshot().plan?.entries.map((e) => e.title)
+    session.updatePlan([{ title: '乱改' }])
+    const after = session.snapshot().plan?.entries.map((e) => e.title)
+    expect(after, '非暂停态的计划编辑不生效').toEqual(before)
+    await waitFor(() => session.snapshot().state === 'finished', 8000)
+  })
+
+  it('暂停态点结束要把会话真正收束，而不是永远停在暂停上', { timeout: 15000 }, async () => {
+    const { deps } = makeDeps({ answers: [done], planReply: PLAN_REPLY, confirmPlan: true })
+    const session: Session = new ExplorerSession(deps)
+    await session.start(metaOf('plan-stop'), '走通', { maxSteps: 10 })
+    await waitFor(() => session.snapshot().state === 'paused')
+
+    session.stop()
+    await waitFor(() => session.snapshot().state === 'finished', 8000)
   })
 })
 
