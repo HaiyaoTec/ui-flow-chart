@@ -31,7 +31,11 @@ export class GraphStore {
     this.graph = readJson<FlowGraph>(join(this.dir, 'graph.json'), emptyGraph(targetUrl, deviceId))
     this.graph.meta.targetUrl = targetUrl
     this.graph.meta.deviceId = deviceId
-    for (const n of this.graph.nodes) this.bySignature.set(n.signatureHash, n.id)
+    for (const n of this.graph.nodes) {
+      this.bySignature.set(n.signatureHash, n.id)
+      // 合并进来的别名签名同样指向本节点，防止被合并的界面再次被建出
+      for (const s of n.aliasSigs ?? []) this.bySignature.set(s, n.id)
+    }
   }
 
   get(): FlowGraph {
@@ -146,6 +150,46 @@ export class GraphStore {
     return e
   }
 
+  updateLane(id: string, patch: Partial<FlowLane>): FlowLane | null {
+    const l = this.graph.lanes.find((x) => x.id === id)
+    if (!l) return null
+    Object.assign(l, patch, { id: l.id })
+    return l
+  }
+
+  /* ------------------------------ 排除与合并 ------------------------------ */
+
+  /** 界面签名是否在人工删除的排除清单里。命中就不再为它建节点 */
+  isExcluded(sig: string): boolean {
+    return this.graph.excluded?.includes(sig) ?? false
+  }
+
+  /** 把签名记入排除清单。人工删除节点时调用，被删界面再探索到也不复活 */
+  exclude(sigs: string[]): void {
+    const set = new Set(this.graph.excluded ?? [])
+    for (const s of sigs) if (s) set.add(s)
+    this.graph.excluded = [...set]
+  }
+
+  /**
+   * 把 loser 合并进 keeper：连线整体重定向、签名转为 keeper 的别名、节点删除。
+   * 重定向后可能出现的重复连线交给确定性清理层收敛，这里不做去重。
+   */
+  mergeNodes(keeperId: string, loserId: string): boolean {
+    const keeper = this.graph.nodes.find((n) => n.id === keeperId)
+    const loser = this.graph.nodes.find((n) => n.id === loserId)
+    if (!keeper || !loser || keeperId === loserId) return false
+
+    for (const e of this.graph.edges) {
+      if (e.from === loserId) e.from = keeperId
+      if (e.to === loserId) e.to = keeperId
+    }
+    keeper.aliasSigs = [...new Set([...(keeper.aliasSigs ?? []), loser.signatureHash, ...(loser.aliasSigs ?? [])])]
+    for (const s of keeper.aliasSigs) this.bySignature.set(s, keeperId)
+    this.graph.nodes = this.graph.nodes.filter((n) => n.id !== loserId)
+    return true
+  }
+
   /** 按 id 批量删边，返回真正删掉的那些。收尾整理合并重复连线时用 */
   removeEdges(ids: string[]): string[] {
     if (!ids.length) return []
@@ -212,6 +256,11 @@ export class GraphStore {
   /** 每步事件追加落盘，供审计与崩溃后重放 */
   appendSession(entry: Record<string, unknown>): void {
     this.appendSafe('session.jsonl', JSON.stringify({ t: Date.now(), ...entry }) + '\n')
+  }
+
+  /** 探索轨迹追加落盘。只追加不修改，是图谱生成阶段的输入 */
+  appendTrace(entry: Record<string, unknown>): void {
+    this.appendSafe('trace.jsonl', JSON.stringify({ t: Date.now(), ...entry }) + '\n')
   }
 
   /**

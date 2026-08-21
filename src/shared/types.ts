@@ -120,6 +120,8 @@ export interface FlowNode {
   id: string
   /** 界面签名哈希，节点去重键 */
   signatureHash: string
+  /** 合并进来的其他界面签名。命中任何一个都视为本界面，防止合并后的界面被再次建出 */
+  aliasSigs?: string[]
   lane: string
   col: number
   sub: number
@@ -136,6 +138,10 @@ export interface FlowNode {
     notices: string[]
     hasDialog: boolean
   }
+  /** 语义未整理：标题与泳道还是探索期的机械占位，等图谱生成阶段补齐 */
+  draft?: boolean
+  /** 人工修正过的字段名。重新生成图谱时这些字段跳过，不被自动结果覆盖 */
+  pinned?: string[]
   ts: string
 }
 
@@ -146,6 +152,8 @@ export interface FlowEdge {
   label: string
   type: EdgeType
   createdBy: 'ai' | 'human'
+  /** 人工修正过的字段名。重新生成图谱时这些字段跳过 */
+  pinned?: string[]
   ts: string
 }
 
@@ -161,6 +169,8 @@ export interface FlowGraph {
   lanes: FlowLane[]
   nodes: FlowNode[]
   edges: FlowEdge[]
+  /** 人工删除的界面签名。再次探索到也不复活 */
+  excluded?: string[]
 }
 
 export interface GraphPatch {
@@ -169,6 +179,8 @@ export interface GraphPatch {
   addedLanes?: FlowLane[]
   addedNodes?: FlowNode[]
   addedEdges?: FlowEdge[]
+  /** 泳道重命名等就地修改 */
+  updatedLanes?: FlowLane[]
   updatedNodes?: FlowNode[]
   removedNodeIds?: string[]
   /** 收尾整理：改写连线的标注与类型 */
@@ -320,31 +332,57 @@ export interface AiAction {
   value?: string
   scrollDelta?: number
   reason: string
-  screen: {
+  /**
+   * 旧版探索问询要求模型同时命名当前界面。生成流程重划后节点由引擎机械命名、
+   * 图谱生成阶段批量补齐语义，这两个字段不再使用；保留声明是为了旧决策录像能照常回放。
+   */
+  screen?: {
     id: string
     title: string
     lane: string
     laneTitle?: string
     kind: NodeKind
   }
-  edgeLabel: string
+  edgeLabel?: string
   needHumanReason?: 'login' | 'captcha' | 'payment' | 'other'
 }
 
-/** 每步发给 AI 的输入 */
+/** 每步发给 AI 的输入。探索问询只负责选动作，不再携带图谱语义上下文 */
 export interface AiDecideInput {
   goal: string
   step: number
   budgets: { stepsLeft: number; aiCallsLeft: number }
   screenshotJpegBase64: string
   probe: ProbeResult
-  knownLanes: FlowLane[]
-  knownNodes: Array<{ id: string; title: string; lane: string }>
-  currentNodeId: string | null
+  /** 当前界面此前被访问过几次，用于提示模型换方向 */
+  visitCount?: number
   /** 上一步的执行结果或失败反馈 */
   lastOutcome?: string
   /** 已知会导致回环、禁止再选的动作描述 */
   forbidden?: string[]
+}
+
+/* --------------------------------- 轨迹 ---------------------------------- */
+
+/**
+ * 探索轨迹的一步。只追加、不修改，是图谱生成阶段的输入；
+ * 与 session.jsonl（状态审计）、ai.jsonl（调用录像）分工，互不替代。
+ */
+export interface TraceStep {
+  t: number
+  runId: string
+  step: number
+  url: string
+  /** 界面签名，截图按它存储，轨迹不重复存图 */
+  sig: string
+  /** 这一步落到的节点与是否新建 */
+  nodeId: string
+  isNew: boolean
+  /** 本步执行的动作与结果。need_human / done 也记 */
+  action: AiActionKind
+  targetText?: string
+  ok?: boolean
+  outcome?: string
 }
 
 /* -------------------------------- 应用设置 ------------------------------- */

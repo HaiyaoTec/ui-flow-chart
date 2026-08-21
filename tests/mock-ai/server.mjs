@@ -235,26 +235,91 @@ function reviewKind(body, text) {
   const tools = (body.tools ?? []).map((t) => t.name)
   if (tools.includes('classify_lanes') || /## 待归类的界面/.test(text)) return 'classify_lanes'
   if (tools.includes('review_edges') || /## 待审查的连线组/.test(text)) return 'review_edges'
+  if (tools.includes('name_screens') || /## 待命名的界面/.test(text)) return 'name_screens'
+  if (tools.includes('relabel_edges') || /## 待改写的连线/.test(text)) return 'relabel_edges'
+  if (tools.includes('merge_screens') || /## 待判定的候选对/.test(text)) return 'merge_screens'
   return null
 }
 
-/**
- * 归类应答。
- *
- * 刻意把其中一个界面归到与继承值不同的新泳道（verify / 安全验证）——
- * 这样断言才能区分「AI 归类真的生效」与「只是继承回落生效」。
- */
-function classifyLanes(text) {
-  const assignments = []
-  for (const m of text.matchAll(/^ {2}(manual-\d+)$/gm)) {
-    const nodeId = m[1]
-    assignments.push(
-      nodeId === 'manual-1'
-        ? { nodeId, lane: 'verify', laneTitle: '安全验证', confidence: 'high' }
-        : { nodeId, lane: 'login', confidence: 'high' }
-    )
+/** 从问询文本里解析节点块：两个空格的 id 行 + 四个空格的属性行 */
+function parseNodeBlocks(text) {
+  const blocks = []
+  let cur = null
+  for (const line of text.split(String.fromCharCode(10))) {
+    const idm = line.match(/^ {2}(\S+)$/)
+    if (idm) {
+      cur = { nodeId: idm[1], url: '', notices: '' }
+      blocks.push(cur)
+      continue
+    }
+    const um = line.match(/^ {4}地址：(\S+)/)
+    if (um && cur) cur.url = um[1]
+    const nm = line.match(/^ {4}提示：(.*)/)
+    if (nm && cur) cur.notices = nm[1]
   }
-  return { assignments }
+  return blocks
+}
+
+/**
+ * 泳道划分应答（全局）。
+ *
+ * 按地址归入功能泳道；验证码页刻意归到新泳道（verify / 安全验证）——
+ * 机械泳道与继承回落都给不出 verify，这样断言才能区分「AI 划分真的生效」与「只是回落顶上」。
+ */
+function laneFor(u) {
+  if (/captcha/.test(u)) return { lane: 'verify', laneTitle: '安全验证' }
+  if (/success\.html\?from=login/.test(u)) return { lane: 'login', laneTitle: '登录' }
+  if (/login/.test(u)) return { lane: 'login', laneTitle: '登录' }
+  if (/register|success/.test(u)) return { lane: 'register', laneTitle: '注册' }
+  return { lane: 'entry', laneTitle: '入口' }
+}
+
+function classifyLanes(text) {
+  return {
+    assignments: parseNodeBlocks(text).map((b) => ({ nodeId: b.nodeId, ...laneFor(b.url), confidence: 'high' })),
+  }
+}
+
+/** 命名应答：按地址与提示文案给规范名 */
+function titleFor(b) {
+  const u = b.url
+  // success 的地址带 from=login / from=register，必须先于 login、register 判定
+  if (/success/.test(u)) return { title: '操作成功', kind: 'normal' }
+  if (/index/.test(u)) return { title: '首页', kind: 'normal' }
+  if (/register/.test(u) && /手机号长度|手机号格式/.test(b.notices)) return { title: '注册·手机号格式校验', kind: 'validation' }
+  if (/register/.test(u) && /两次输入的密码不一致/.test(b.notices)) return { title: '注册·确认密码校验', kind: 'validation' }
+  if (/register/.test(u) && /密码不能为空/.test(b.notices)) return { title: '注册·必填项校验', kind: 'validation' }
+  if (/register/.test(u)) return { title: '注册表单', kind: 'normal' }
+  if (/login/.test(u) && /不能为空/.test(b.notices)) return { title: '登录·必填项校验', kind: 'validation' }
+  if (/login/.test(u)) return { title: '登录表单', kind: 'normal' }
+  if (/captcha/.test(u)) return { title: '安全验证·图形验证码', kind: 'normal' }
+  if (/success/.test(u)) return { title: '操作成功', kind: 'normal' }
+  return { title: '未识别界面', kind: 'normal' }
+}
+
+function nameScreens(text) {
+  return { names: parseNodeBlocks(text).map((b) => ({ nodeId: b.nodeId, ...titleFor(b) })) }
+}
+
+/** 标注语义化应答：只改写指向校验提示界面的连线 */
+function relabelEdges(text) {
+  const labels = []
+  for (const line of text.split(String.fromCharCode(10))) {
+    const m = line.match(/^ {2}(\S+)｜.*｜现标注：([^｜]*)｜目标界面提示：(.*)$/)
+    if (!m) continue
+    const [, edgeId, cur, notice] = m
+    if (/手机号长度|手机号格式/.test(notice)) labels.push({ edgeId, label: '输入手机号（过短）→ 系统校验失败：手机号格式' })
+    else if (/两次输入的密码不一致/.test(notice)) labels.push({ edgeId, label: `${cur.trim()} → 系统校验失败：确认密码` })
+    else if (/不能为空/.test(notice)) labels.push({ edgeId, label: `${cur.trim()} → 系统校验失败：必填项` })
+  }
+  return { labels }
+}
+
+/** 合并判定应答：一律不合并（注册页的多个校验态本来就不该合并） */
+function mergeScreens(text) {
+  const pairs = []
+  for (const m of text.matchAll(/^ {2}(p\d+)（/gm)) pairs.push({ pairId: m[1], merge: false })
+  return { pairs }
 }
 
 /** 审边应答：每组只留第一条 */
@@ -319,7 +384,16 @@ const server = createServer((req, res) => {
         res.writeHead(200, { 'Content-Type': 'application/json' })
         return res.end(JSON.stringify(bad))
       }
-      const out = kind === 'classify_lanes' ? classifyLanes(text) : reviewEdges(text)
+      const out =
+        kind === 'classify_lanes'
+          ? classifyLanes(text)
+          : kind === 'review_edges'
+            ? reviewEdges(text)
+            : kind === 'name_screens'
+              ? nameScreens(text)
+              : kind === 'relabel_edges'
+                ? relabelEdges(text)
+                : mergeScreens(text)
       const payload = isAnthropic
         ? { content: [{ type: 'tool_use', name: kind, input: out }], model: body.model }
         : { choices: [{ message: { content: JSON.stringify(out) } }], model: body.model }

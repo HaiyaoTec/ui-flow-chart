@@ -15,15 +15,13 @@ import {
   type SessionSnapshot,
   type SessionState,
 } from '@shared/types'
-import type { IAiClient, ReviewTask } from '../ai/types'
+import type { IAiClient } from '../ai/types'
 import { ActionParseError } from '../ai/parseAction'
-import { sanitizeEdgeReview, sanitizeLaneAssignments } from '../ai/parseReview'
-import { buildEdgeReviewTask, buildLaneClassifyTask } from '../ai/reviewPrompt'
-import { describeFinalize, finalizeGraph, type AiVerdict } from './finalize'
-import { inheritLanes, planCleanup } from './graphCleanup'
 import { GraphStore } from './graphStore'
 import { log } from '../log'
+import { laneOfUrl, mechanicalEdgeLabel, placeholderTitle } from './naming'
 import { delay, type PageDriver, type Screenshot } from './PageDriver'
+import { describeRefine, refineGraph } from './refine'
 import { signatureHash } from './signature'
 import { WatchRecorder } from './watchRecorder'
 
@@ -202,6 +200,7 @@ export class ExplorerSession {
     this.currentNodeId = null
     this.lastOutcome = ''
     this.lastActionKind = ''
+    this.lastEdgeLabel = ''
     this.stopRequested = false
     this.pauseRequested = false
     this.takeoverRequested = false
@@ -366,14 +365,12 @@ export class ExplorerSession {
         if (this.sigHistory.length > 12) this.sigHistory.shift()
 
         /*
-         * 回到已知界面时先不建边。
-         *
-         * edgeLabel 按提示词约定描述「上一步动作到当前屏」的转移，只有拿到本步的
-         * AI 输出才有正确的标注。原先在这里就用上一步存下的标注建边，等于把每条边的
-         * 标注都错位一步——「自动跳转：登录状态恢复」会标到「首页 → 游戏详情」上。
-         * 建边统一在 applyScreen 里做，这里只记停滞。
+         * 建边统一在 applyScreen 里做，这里只记停滞与排除。
+         * 人工删除过的界面（排除清单）不再建图，但动作照常执行——
+         * 页面还是要经过它往下走，只是图上不出现。
          */
-        const known = store.findBySignature(sig)
+        const excludedScreen = store.isExcluded(sig)
+        const known = excludedScreen ? undefined : store.findBySignature(sig)
         if (known) this.noProgress += 1
 
         /* ---------- 接管判定：用户动手了就让位 ----------
@@ -430,11 +427,13 @@ export class ExplorerSession {
         this.log(
           'info',
           `　动作 ${action.action}${action.targetIdx !== undefined ? ` #${action.targetIdx}` : ''}` +
-            `${action.value ? `="${action.value}"` : ''} · 命名「${action.screen.title}」· ${action.reason}`
+            `${action.value ? `="${action.value}"` : ''} · ${action.reason}`
         )
 
-        /* ---------- 落图 ---------- */
-        const placed = this.applyScreen(probe, shot, action, known)
+        /* ---------- 落图。排除清单里的界面不建图，但动作照常执行 ---------- */
+        const placed = excludedScreen
+          ? { isNew: false, nodeId: this.currentNodeId ?? '' }
+          : this.applyScreen(probe, shot, known)
         if (placed.isNew) {
           // 有进展就把这一屏的动作配额与停滞计数清零，
           // 否则一个界面用光配额后会永久卡在「强制回退」上
@@ -444,10 +443,12 @@ export class ExplorerSession {
         }
 
         if (action.action === 'done') {
+          this.trace({ step: this.step, url: probe.url, sig, nodeId: placed.nodeId, isNew: placed.isNew, action: 'done' })
           this.log('info', `AI 判定探索完成：${action.reason}`)
           return await this.finalizeAndFinish()
         }
         if (action.action === 'need_human') {
+          this.trace({ step: this.step, url: probe.url, sig, nodeId: placed.nodeId, isNew: placed.isNew, action: 'need_human' })
           this.takeoverRequested = true
           this.reason = `AI 请求人工介入（${action.needHumanReason ?? 'other'}）：${action.reason}`
           this.emit({ kind: 'need-human', reason: this.reason, hint: '请在预览窗口中手动完成，然后点击「结束接管」' })
@@ -456,7 +457,7 @@ export class ExplorerSession {
 
         /* ---------- 循环与配额检查 ---------- */
         if (visited > MAX_VISITS_PER_SIGNATURE || this.isOscillating()) {
-          this.forbid(`在「${action.screen.title}」上重复执行 ${action.edgeLabel}`)
+          this.forbid(`在「${placeholderTitle(probe)}」上重复当前操作`)
           this.log('warn', '检测到界面回环，已提示 AI 避开该动作')
         }
         const acted = (this.screenActions.get(sig) ?? 0) + 1
@@ -468,9 +469,10 @@ export class ExplorerSession {
             this.log('warn', '同一界面尝试的动作过多，强制回退')
             await this.deps.driver.back()
             this.lastActionKind = 'back'
+            this.lastEdgeLabel = '关闭返回'
             continue
           }
-          this.forbid(`界面「${action.screen.title}」上的可选动作已尝试多次，请换一个入口或输出 done`)
+          this.forbid(`界面「${placeholderTitle(probe)}」上的可选动作已尝试多次，请换一个入口或输出 done`)
           this.log('warn', '同一界面动作已穷尽，且无法回退')
         }
         if (this.noProgress >= NO_PROGRESS_LIMIT) {
@@ -487,8 +489,19 @@ export class ExplorerSession {
         /* ---------- 执行 ---------- */
         this.setState('acting')
         const ok = await this.execute(action, probe)
-        // 失败的动作没有产生转移，不能让它给下一条边定类型
+        // 失败的动作没有产生转移，不能让它给下一条边定类型或标注
         this.lastActionKind = ok ? action.action : ''
+        if (!ok) this.lastEdgeLabel = ''
+        this.trace({
+          step: this.step,
+          url: probe.url,
+          sig,
+          nodeId: placed.nodeId,
+          isNew: placed.isNew,
+          action: action.action,
+          ok,
+          label: this.lastEdgeLabel || undefined,
+        })
         if (!ok) {
           const fails = (this.screenFails.get(sig) ?? 0) + 1
           this.screenFails.set(sig, fails)
@@ -512,8 +525,8 @@ export class ExplorerSession {
     } catch (e) {
       this.lastError = e instanceof Error ? e.message : String(e)
       this.log('error', `探索中断：${this.lastError}`)
-      // 崩溃也把图收拾一遍，但不覆盖 failed 状态：用户得知道这轮是断掉的
-      this.runFinalize()
+      // 崩溃也把图收拾一遍（只做确定性整理），但不覆盖 failed 状态：用户得知道这轮是断掉的
+      await this.runRefine(true)
       this.setState('failed', this.lastError)
     }
   }
@@ -522,12 +535,19 @@ export class ExplorerSession {
 
   /** 上一步实际执行成功的动作种类，用于给「到达当前屏」的连线定类型 */
   private lastActionKind: AiAction['action'] | '' = ''
+  /** 上一步动作的机械标注，建「上一屏 → 当前屏」的连线时用。执行失败会被清空 */
+  private lastEdgeLabel = ''
 
-  /** 把当前界面写进图谱，必要时新建节点与连线 */
+  /**
+   * 把当前界面写进图谱。
+   *
+   * 节点由引擎机械命名（页面标题占位、地址路径首段作泳道、按提示文案定性），
+   * 带 draft 标记；规范的语义命名由图谱生成阶段批量补齐。连线标注取上一步
+   * 动作的机械描述——标注与实际转移永远对得上，模型不参与。
+   */
   private applyScreen(
     probe: ProbeResult,
     shot: { png: Buffer; jpegBase64: string } | null,
-    action: AiAction,
     known: FlowNode | undefined
   ): { isNew: boolean; nodeId: string } {
     const store = this.store!
@@ -551,19 +571,21 @@ export class ExplorerSession {
         updated.push(known)
       }
     } else {
-      const lane = store.ensureLane(action.screen.lane, action.screen.laneTitle || action.screen.lane)
+      const laneSpec = laneOfUrl(probe.url)
+      const lane = store.ensureLane(laneSpec.id, laneSpec.title)
       if (lane) lanes.push(lane)
       const node = store.addNode({
-        id: action.screen.id,
+        id: `s${store.get().nodes.length + 1}`,
         signatureHash: sig,
-        lane: action.screen.lane,
-        kind: action.screen.kind,
-        title: action.screen.title,
+        lane: laneSpec.id,
+        kind: probe.notices.length ? 'validation' : 'normal',
+        title: placeholderTitle(probe),
         note: probe.notices.length ? probe.notices.join(' / ') : undefined,
         url: probe.url,
         createdBy: 'ai',
         probe,
       })
+      node.draft = true
       if (shot) store.saveShot(node.id, shot.png, shot.jpegBase64)
       nodes.push(node)
       nodeId = node.id
@@ -572,9 +594,8 @@ export class ExplorerSession {
     }
 
     if (this.currentNodeId && this.currentNodeId !== nodeId) {
-      // edgeLabel 描述的是「上一屏到当前屏」的转移（与提示词约定一致），标在本条边上
-      const type = known ? ('link' as const) : this.classifyEdge(probe, action.screen.kind)
-      const edge = store.addEdge(this.currentNodeId, nodeId, action.edgeLabel || '自动跳转', type, 'ai')
+      const type = known ? ('link' as const) : this.classifyEdge(probe)
+      const edge = store.addEdge(this.currentNodeId, nodeId, this.lastEdgeLabel || '自动跳转', type, 'ai')
       if (edge) edges.push(edge)
     }
 
@@ -593,10 +614,9 @@ export class ExplorerSession {
   }
 
   /** 给「到达当前屏」的连线定类型。back 看的是上一步实际执行的动作，而不是本步的决策 */
-  private classifyEdge(probe: ProbeResult, kind: AiAction['screen']['kind']): FlowEdge['type'] {
+  private classifyEdge(probe: ProbeResult): FlowEdge['type'] {
     if (probe.notices.length) return 'branch'
     if (this.lastActionKind === 'back') return 'back'
-    if (kind === 'validation') return 'branch'
     return 'primary'
   }
 
@@ -636,9 +656,7 @@ export class ExplorerSession {
             },
             screenshotJpegBase64: jpeg,
             probe,
-            knownLanes: store.get().lanes,
-            knownNodes: store.get().nodes.map((n) => ({ id: n.id, title: n.title, lane: n.lane })),
-            currentNodeId: this.currentNodeId,
+            visitCount: this.visits.get(signatureHash(probe)),
             lastOutcome: [this.lastOutcome, lastErr && `上一次输出无法解析：${lastErr}，请严格按结构重新输出`]
               .filter(Boolean)
               .join('\n'),
@@ -695,6 +713,7 @@ export class ExplorerSession {
           if (action.action === 'click') {
             await driver.tap(cx, cy)
             this.lastOutcome = `已点击「${same.text || same.placeholder || same.name}」`
+            this.lastEdgeLabel = mechanicalEdgeLabel(action, same.text || same.placeholder || same.name)
           } else {
             const wrote = await driver.fillAt(cx, cy, action.value ?? '', {
               name: same.name || undefined,
@@ -706,16 +725,19 @@ export class ExplorerSession {
               return false
             }
             this.lastOutcome = `已在「${same.placeholder || same.name || same.text}」中填入测试数据`
+            this.lastEdgeLabel = mechanicalEdgeLabel(action, same.placeholder || same.name || same.text)
           }
           return true
         }
         case 'scroll':
           await driver.scrollBy(action.scrollDelta ?? 600)
           this.lastOutcome = '已滚动页面'
+          this.lastEdgeLabel = mechanicalEdgeLabel(action)
           return true
         case 'back':
           await driver.back()
           this.lastOutcome = '已返回上一页'
+          this.lastEdgeLabel = mechanicalEdgeLabel(action)
           return true
         default:
           return true
@@ -807,6 +829,7 @@ export class ExplorerSession {
     this.lastOutcome = `人工接管完成${done ? `：${done}` : ''}。当前界面已变化，请基于新界面继续。`
     // 接管期的转移是人工产生的，上一个自动动作已经不是「到达下一屏」的原因
     this.lastActionKind = ''
+    this.lastEdgeLabel = ''
     this.reason = undefined
     await this.deps.driver.clearUserInput()
     this.setState('resuming')
@@ -891,93 +914,49 @@ export class ExplorerSession {
   }
 
   /**
-   * 收尾整理 + 收束会话。
+   * 图谱生成 + 收束会话。
    *
    * 对外契约：**绝不 reject**。它是从 loop 的 try 里 await 的，一旦抛出就会掉进
    * catch 被判成 failed——一次成功的探索会显示成「已中断」。
    */
   private async finalizeAndFinish(): Promise<void> {
     this.setState('finishing')
-    const verdict = await this.askAiToReview().catch(() => undefined)
-    this.runFinalize(verdict)
+    await this.runRefine(false)
     this.toFinished()
   }
 
   /**
-   * 收尾的 AI 那一层：把人工接管的界面归类、在重复连线里挑该留的。
-   *
-   * 两件事分两次问：输入完全不同，一次失败不该拖累另一次，而且两个小请求
-   * 比一个大请求更不容易被 max_tokens 截断。
-   * 全程失败即回落——确定性层已经把八成的事情做完了，这里只是锦上添花，
-   * 所以不重试、超时也比每步决策短一半。
-   */
-  private async askAiToReview(): Promise<AiVerdict | undefined> {
-    const store = this.store
-    if (!store || this.stopRequested) return undefined
-    // 预算耗尽后仍允许收尾用两次，否则「跑满额度 → 结束」这条最常见的路径永远享受不到整理
-    if (this.aiCalls > this.budgets.maxAiCalls + 8) return undefined
-
-    const graph = store.get()
-    const verdict: AiVerdict = {}
-
-    const candidates = graph.nodes.filter((n) => n.lane === MANUAL_LANE_ID).map((n) => n.id)
-    const inherited = inheritLanes(graph)
-    if (candidates.length) {
-      const known = new Set(graph.lanes.map((l) => l.id).filter((id) => id !== MANUAL_LANE_ID))
-      const out = await this.runReview(buildLaneClassifyTask(graph, candidates, inherited), '归类')
-      if (out) {
-        const s = sanitizeLaneAssignments(out.assignments, candidates, inherited, known)
-        verdict.lanes = s.lanes
-        verdict.laneTitles = s.titles
-        if (s.rejected) this.log('warn', `归类结果有 ${s.rejected} 条不符合约束，已按上游泳道归类`)
-      }
-    }
-
-    const groups = planCleanup(graph).groups
-    if (groups.length && !this.stopRequested) {
-      const out = await this.runReview(buildEdgeReviewTask(graph, groups), '连线审查')
-      if (out) {
-        const s = sanitizeEdgeReview(out.groups, groups)
-        verdict.dropEdgeIds = s.dropIds
-        verdict.relabel = s.relabel
-        if (s.rejected) this.log('warn', `连线审查有 ${s.rejected} 组不符合约束，已保留原状`)
-      }
-    }
-
-    return verdict
-  }
-
-  /** 单次收尾问询。失败只记一行日志，绝不向上抛 */
-  private async runReview<T>(task: ReviewTask<T>, what: string): Promise<T | null> {
-    // 接管期 this.abort 是 null，不挂上去的话用户点结束要干等到超时
-    this.abort = new AbortController()
-    this.aiCalls += 1
-    try {
-      return await this.deps.ai.review(task, this.abort.signal)
-    } catch (e) {
-      this.log('warn', `收尾${what}未完成：${e instanceof Error ? e.message : String(e)}，已按确定性规则整理`)
-      return null
-    } finally {
-      this.abort = null
-    }
-  }
-
-  /**
-   * 确定性收尾。整个包在 try 里：图整理失败也不该让一轮成功的探索显示成中断。
+   * 图谱生成阶段：批量补齐语义（命名、泳道、标注、合并）并做确定性整理。
    * 只跑一次——loop 的正常出口与 catch 分支都会调它。
+   * skipAi 用于崩溃路径：只做确定性整理，不再发问询。
    */
-  private runFinalize(verdict?: AiVerdict): void {
+  private async runRefine(skipAi: boolean): Promise<void> {
     if (this.finalizeDone || !this.store) return
     this.finalizeDone = true
     try {
-      const r = finalizeGraph(this.store, verdict)
-      this.log('info', describeFinalize(r))
-      if (r.merged || r.dropped) {
-        this.store.appendSession({ kind: 'cleanup', merged: r.merged, dropped: r.dropped, moved: r.moved })
-      }
+      const r = await refineGraph(this.store, this.deps.ai, {
+        skipAi: skipAi || this.stopRequested,
+        // 问询期挂上中断器，用户点结束不必干等到超时
+        signalOf: () => {
+          this.abort = new AbortController()
+          return this.abort.signal
+        },
+        shouldStop: () => this.stopRequested,
+        // 预算耗尽后仍给生成阶段留若干次问询：「跑满额度 → 结束」是最常见的路径，
+        // 不能让它享受不到整理
+        canCall: () => this.aiCalls <= this.budgets.maxAiCalls + 12,
+        onAiCall: () => {
+          this.aiCalls += 1
+        },
+        onLog: (level, message) => this.log(level, message),
+      })
+      this.log('info', describeRefine(r))
+      this.record({ kind: 'refine', ...r.stats })
       this.deps.emitPatch(r.patch)
     } catch (e) {
       this.log('warn', `图谱整理未完成：${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      this.abort = null
     }
   }
 
@@ -1030,6 +1009,11 @@ export class ExplorerSession {
   /** 所有落盘记录的唯一出口：统一带上运行标识，多轮记录才切得开 */
   private record(entry: Record<string, unknown>): void {
     this.store?.appendSession({ runId: this.runId, ...entry })
+  }
+
+  /** 探索轨迹落盘。只追加不修改，是图谱生成阶段的输入 */
+  private trace(entry: Record<string, unknown>): void {
+    this.store?.appendTrace({ runId: this.runId, ...entry })
   }
 
   private emit(event: SessionEvent): void {

@@ -1,16 +1,15 @@
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import type { AiAction, FlowGraph, GraphPatch, ProbeResult, ProjectMeta } from '@shared/types'
 
 /*
- * 连线标注的对应关系测试。
+ * 结构层建图的正确性测试。
  *
- * 提示词要求 AI 输出的 edgeLabel 是「上一步动作到当前屏的转移标注」——
- * 也就是说第 N 步的 edgeLabel 描述的是第 N-1 步动作引起的那次转移。
- * 引擎必须把它标在「上一屏 → 当前屏」的连线上；错一步的话，
- * 用户看到的就是「自动跳转：登录状态恢复」标在「首页 → 游戏详情」上这种图文不一致。
+ * 生成流程重划后，探索问询只输出动作；节点由引擎机械命名（带 draft 标记），
+ * 连线标注由「上一步实际执行成功的动作」机械生成——标注与转移必须严格对应，
+ * 且执行失败的动作不得污染下一条边。语义补齐由图谱生成阶段负责，不在本测试范围。
  */
 const dataDir = mkdtempSync(join(tmpdir(), 'ufc-edge-'))
 vi.mock('electron', () => ({
@@ -31,7 +30,7 @@ beforeAll(async () => {
 /** 每个路径一屏：url 与正文都不同，签名互不相同 */
 const probeOf = (path: string): ProbeResult => ({
   url: `http://site.test${path}`,
-  title: path,
+  title: `页面${path}`,
   hasDialog: false,
   dialogClass: '',
   text: `page ${path} content`,
@@ -68,6 +67,9 @@ const metaOf = (id: string): ProjectMeta =>
     updatedAt: new Date(0).toISOString(),
   }) as ProjectMeta
 
+const click: AiAction = { action: 'click', targetIdx: 0, reason: 'x' }
+const done: AiAction = { action: 'done', reason: 'x' }
+
 /** 按点击次数在给定路径序列上前进的假站点 + 按调用次序回答的假 AI */
 function makeDeps(flow: string[], answers: AiAction[]): {
   deps: Deps
@@ -93,8 +95,9 @@ function makeDeps(flow: string[], answers: AiAction[]): {
   const ai = {
     name: 'fake',
     decide: async (): Promise<AiAction> => answers[Math.min(call++, answers.length - 1)],
+    // 生成阶段的问询失败即回落，正好让图停在结构层，便于断言机械结果
     review: async () => {
-      throw new Error('本测试不涉及收尾审查')
+      throw new Error('本测试不跑语义问询')
     },
     testConnection: async () => ({ ok: true, latencyMs: 1 }),
   }
@@ -126,68 +129,65 @@ async function waitFor(cond: () => boolean, ms = 5000): Promise<void> {
 const graphOf = (id: string): FlowGraph =>
   JSON.parse(readFileSync(join(projectDir(id), 'graph.json'), 'utf8')) as FlowGraph
 
-const screen = (id: string, title: string): AiAction['screen'] => ({
-  id,
-  title,
-  lane: 'main',
-  laneTitle: '主流程',
-  kind: 'normal',
-})
+const nodeAt = (g: FlowGraph, path: string) => g.nodes.find((n) => n.url === `http://site.test${path}`)
 
-describe('连线标注与截图的对应关系', () => {
-  it('edgeLabel 描述的是到达当前屏的转移，必须标在上一屏指向当前屏的连线上', async () => {
-    // /a --点击--> /b --点击--> /c；AI 按提示词语义在每步输出「我如何到达当前屏」
-    const { deps } = makeDeps(
-      ['/a', '/b', '/c'],
-      [
-        { action: 'click', targetIdx: 0, reason: 'x', screen: screen('a', '首页'), edgeLabel: '打开站点' },
-        { action: 'click', targetIdx: 0, reason: 'x', screen: screen('b', '列表页'), edgeLabel: '点击「go/a」' },
-        { action: 'done', reason: 'x', screen: screen('c', '详情页'), edgeLabel: '点击「go/b」' },
-      ]
-    )
+describe('结构层建图', () => {
+  it('连线标注取自上一步实际执行的动作，节点带机械占位与 draft 标记', async () => {
+    // /a --点击--> /b --点击--> /c
+    const { deps } = makeDeps(['/a', '/b', '/c'], [click, click, done])
     const session: Session = new ExplorerSession(deps)
     await session.start(metaOf('edge-linear'), '走通', { maxSteps: 10 })
     await waitFor(() => session.snapshot().state === 'finished')
 
     const graph = graphOf('edge-linear')
-    const ab = graph.edges.find((e) => e.from === 'a' && e.to === 'b')
-    const bc = graph.edges.find((e) => e.from === 'b' && e.to === 'c')
-    expect(ab, '首页到列表页必须有连线').toBeTruthy()
-    expect(bc, '列表页到详情页必须有连线').toBeTruthy()
-    expect(ab!.label, 'a→b 的标注应取自「到达 b 那一步」的 edgeLabel').toBe('点击「go/a」')
-    expect(bc!.label, 'b→c 的标注应取自「到达 c 那一步」的 edgeLabel').toBe('点击「go/b」')
+    const a = nodeAt(graph, '/a')
+    const b = nodeAt(graph, '/b')
+    const c = nodeAt(graph, '/c')
+    expect(a && b && c, '三屏都要建出节点').toBeTruthy()
+
+    // 占位命名：标题机械取自页面标题，draft 表示语义待补（本测试的语义问询全部回落）
+    expect(a!.title).toBe('页面/a')
+    expect(a!.draft, '语义未补齐的节点保持 draft').toBe(true)
+
+    const ab = graph.edges.find((e) => e.from === a!.id && e.to === b!.id)
+    const bc = graph.edges.find((e) => e.from === b!.id && e.to === c!.id)
+    expect(ab!.label, 'a→b 的标注是「在 a 上执行的动作」').toBe('点击「go/a」')
+    expect(bc!.label, 'b→c 的标注是「在 b 上执行的动作」').toBe('点击「go/b」')
   })
 
-  it('回到已知界面时同样用本步的 edgeLabel，且用新截图顶掉首访时的存档图', async () => {
+  it('回到已知界面时建 link 边、刷新存档图，轨迹逐步落盘', async () => {
     // /a --点击--> /b --点击--> /a（回到已知界面）
-    const { deps, patches } = makeDeps(
-      ['/a', '/b', '/a'],
-      [
-        { action: 'click', targetIdx: 0, reason: 'x', screen: screen('a', '首页'), edgeLabel: '打开站点' },
-        { action: 'click', targetIdx: 0, reason: 'x', screen: screen('b', '列表页'), edgeLabel: '进入列表页' },
-        { action: 'done', reason: 'x', screen: screen('a', '首页'), edgeLabel: '返回首页' },
-      ]
-    )
+    const { deps, patches } = makeDeps(['/a', '/b', '/a'], [click, click, done])
     const session: Session = new ExplorerSession(deps)
-    await session.start(metaOf('edge-revisit'), '走通', { maxSteps: 10 })
+    const snap = await session.start(metaOf('edge-revisit'), '走通', { maxSteps: 10 })
     await waitFor(() => session.snapshot().state === 'finished')
 
     const graph = graphOf('edge-revisit')
-    const ba = graph.edges.find((e) => e.from === 'b' && e.to === 'a')
+    const a = nodeAt(graph, '/a')
+    const b = nodeAt(graph, '/b')
+    const ba = graph.edges.find((e) => e.from === b!.id && e.to === a!.id)
     expect(ba, '回到已知界面的转移必须有连线').toBeTruthy()
-    expect(ba!.label, 'b→a 的标注应取自「回到 a 那一步」的 edgeLabel').toBe('返回首页')
+    expect(ba!.label, 'b→a 的标注是「在 b 上执行的动作」').toBe('点击「go/b」')
     expect(ba!.type).toBe('link')
 
-    /*
-     * 首访时抓的图可能是半加载的（骨架屏、banner 空白），而节点截图只在首访写一次的话，
-     * 这张残图会永久留存。重访时页面多半已经加载完整，必须用新图顶掉旧图。
-     * 第 3 步（重访 a）抓的是第 3 张图，a 的存档就该是它。
-     */
-    const png = readFileSync(join(projectDir('edge-revisit'), 'screens', 'a.png'), 'utf8')
+    // 首访的半加载图会被重访时的新图顶掉：第 3 步（重访 a）抓的是第 3 张图
+    const png = readFileSync(join(projectDir('edge-revisit'), 'screens', `${a!.id}.png`), 'utf8')
     expect(png, '重访已知界面后，存档图应替换为最新一次抓取').toBe('shot-3')
 
-    // 画布靠 updatedNodes 补丁得知截图变了（URL 带 ts 版本参数），否则会一直显示缓存的旧图
-    const updated = patches.flatMap((p) => p.updatedNodes ?? []).filter((n) => n.id === 'a')
+    // 画布靠 updatedNodes 补丁得知截图变了（URL 带 ts 版本参数）
+    const updated = patches.flatMap((p) => p.updatedNodes ?? []).filter((n) => n.id === a!.id)
     expect(updated.length, '截图刷新必须通过 updatedNodes 通知渲染侧').toBeGreaterThan(0)
+
+    // 轨迹是图谱生成阶段的输入，每个动作步都要有记录
+    const tracePath = join(projectDir('edge-revisit'), 'trace.jsonl')
+    expect(existsSync(tracePath), '探索必须产出轨迹文件').toBe(true)
+    const rows = readFileSync(tracePath, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+      .filter((r) => r.runId === snap.runId)
+    expect(rows.length, '三步都要有轨迹记录').toBeGreaterThanOrEqual(3)
+    expect(rows[0]).toMatchObject({ step: 1, action: 'click', ok: true, label: '点击「go/a」' })
+    expect(rows[rows.length - 1]).toMatchObject({ action: 'done' })
   })
 })

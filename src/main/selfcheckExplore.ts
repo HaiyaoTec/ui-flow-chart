@@ -42,24 +42,39 @@ function checkGraph(graph: FlowGraph | null, state: string, takeover: boolean, a
     if (graph.nodes.some((n) => n.lane === MANUAL_LANE_ID)) fail.push('仍有节点留在人工接管泳道')
 
     /*
-     * mock AI 刻意把 manual-1 归到 verify——继承值是 login，两者不同，
-     * 因此 verify 在不在就能区分「AI 归类真的生效」与「只是继承回落顶上了」。
-     * reviewfail 场景反过来：AI 返回垃圾，verify 不该出现，但上面两条仍须成立。
+     * mock AI 刻意把验证码界面归到 verify——机械泳道（地址路径首段）与继承回落
+     * 都给不出这个 id，因此 verify 在不在就能区分「泳道划分真的生效」与「只是回落顶上了」。
+     * reviewfail 场景反过来：AI 返回垃圾，verify 不该出现，但归位断言仍须成立。
      */
     const hasVerify = graph.lanes.some((l) => l.id === 'verify')
-    if (aiReview && !hasVerify) fail.push('AI 归类未生效：没有出现 verify 泳道')
+    if (aiReview && !hasVerify) fail.push('泳道划分未生效：没有出现 verify 泳道')
     if (!aiReview && hasVerify) fail.push('AI 返回不可解析时不该采信它的归类结果')
+    if (aiReview) {
+      const cap = graph.nodes.find((n) => n.url.includes('captcha'))
+      if (cap && cap.lane !== 'verify') fail.push(`验证码界面未归入 verify 泳道：${cap.lane}`)
+    }
   }
 
   if (!takeover) {
     /*
-     * 边标注的对应关系：mock AI 在「手机号格式错误」那一屏输出的 edgeLabel 是
-     * 「输入手机号（过短）→ 系统校验失败」，按提示词约定它描述的是到达该屏的转移，
-     * 必须标在指向该屏的连线上。标注错位一步时，这条边上会是上一步的动作词。
+     * 命名与标注语义化：节点由引擎机械命名（s1、s2…带占位标题），
+     * 图谱生成阶段的命名问询把它换成规范名、标注语义化问询把校验态入边写明校验点。
+     * 这两条断的是「语义确实落到了图上」，机械占位或标注错位都过不去。
      */
-    const toInvalid = graph.edges.find((e) => e.to === 'register-phone-invalid')
-    if (!toInvalid) fail.push('缺少指向校验态界面的连线，本轮没验到边标注')
-    else if (!/系统校验失败/.test(toInvalid.label)) fail.push(`校验态入边的标注错位：${toInvalid.label}`)
+    const invalid = graph.nodes.find((n) => n.title === '注册·手机号格式校验')
+    if (!invalid) fail.push('缺少「注册·手机号格式校验」界面，命名问询未生效或界面未探到')
+    else {
+      if (invalid.kind !== 'validation') fail.push('手机号格式校验界面未定性为校验态')
+      const toInvalid = graph.edges.find((e) => e.to === invalid.id)
+      if (!toInvalid) fail.push('缺少指向校验态界面的连线，本轮没验到边标注')
+      else if (!/系统校验失败/.test(toInvalid.label)) fail.push(`校验态入边的标注未语义化：${toInvalid.label}`)
+    }
+  }
+
+  if (aiReview) {
+    // 生成阶段跑过之后不该再有待整理的界面；reviewfail 场景相反，占位标题必须原样保留
+    const drafts = graph.nodes.filter((n) => n.draft)
+    if (drafts.length) fail.push(`图谱生成后仍有 ${drafts.length} 个未命名界面`)
   }
 
   const pairs = new Map<string, number>()

@@ -53,7 +53,9 @@ export function sanitizeLaneAssignments(
   raw: LaneAssignment[],
   candidates: string[],
   inherited: Map<string, string>,
-  knownLanes: Set<string>
+  knownLanes: Set<string>,
+  // 全局泳道划分（图谱生成阶段）比接管归位允许更多新泳道
+  maxNewLanes = MAX_NEW_LANES
 ): { lanes: Map<string, string>; titles: Map<string, string>; rejected: number } {
   const allowed = new Set(candidates)
   const lanes = new Map<string, string>()
@@ -73,7 +75,7 @@ export function sanitizeLaneAssignments(
       continue
     }
     if (!knownLanes.has(lane)) {
-      if (newLanes >= MAX_NEW_LANES) {
+      if (newLanes >= maxNewLanes) {
         rejected += 1
         continue
       }
@@ -95,6 +97,154 @@ export function sanitizeLaneAssignments(
 
 export const parseLaneClassify = (raw: string) => parseWithSchema(raw, laneClassifySchema, '泳道归类')
 export const parseLaneClassifyObject = (obj: unknown) => parseObjectWithSchema(obj, laneClassifySchema, '泳道归类')
+
+/* ------------------------------- 界面命名 ------------------------------- */
+
+export const NAME_SCREENS_SCHEMA = {
+  type: 'object',
+  properties: {
+    names: {
+      type: 'array',
+      description: '每个待命名界面一条',
+      items: {
+        type: 'object',
+        properties: {
+          nodeId: { type: 'string', description: '界面 id，必须来自清单' },
+          title: { type: 'string', description: '中文规范名称，如「注册表单·初始态」「登录·必填项未填校验」' },
+          kind: { type: 'string', enum: ['normal', 'validation'], description: 'normal 正常态，validation 校验或错误提示态' },
+        },
+        required: ['nodeId', 'title'],
+      },
+    },
+  },
+  required: ['names'],
+} as const
+
+const screenNameSchema = z.object({
+  nodeId: z.string().min(1),
+  title: z.string().min(1).max(80),
+  kind: z.enum(['normal', 'validation']).optional(),
+})
+
+export const nameScreensSchema = z.object({ names: z.array(screenNameSchema).max(200) })
+export type ScreenName = z.infer<typeof screenNameSchema>
+
+/** 命名结果裁剪：只有清单里的界面能被命名，漏答的保留占位标题（draft 不清） */
+export function sanitizeScreenNames(
+  raw: ScreenName[],
+  candidates: string[]
+): { names: Map<string, { title: string; kind?: 'normal' | 'validation' }>; rejected: number } {
+  const allowed = new Set(candidates)
+  const names = new Map<string, { title: string; kind?: 'normal' | 'validation' }>()
+  let rejected = 0
+  for (const n of raw) {
+    const title = n.title?.trim()
+    if (!allowed.has(n.nodeId) || !title) {
+      rejected += 1
+      continue
+    }
+    names.set(n.nodeId, { title: title.slice(0, 80), kind: n.kind })
+  }
+  return { names, rejected }
+}
+
+export const parseNameScreens = (raw: string) => parseWithSchema(raw, nameScreensSchema, '界面命名')
+export const parseNameScreensObject = (obj: unknown) => parseObjectWithSchema(obj, nameScreensSchema, '界面命名')
+
+/* ------------------------------ 标注语义化 ------------------------------ */
+
+export const RELABEL_EDGES_SCHEMA = {
+  type: 'object',
+  properties: {
+    labels: {
+      type: 'array',
+      description: '每条要改写的连线一条；机械标注已经够准确的连线可以不出现在结果里',
+      items: {
+        type: 'object',
+        properties: {
+          edgeId: { type: 'string', description: '连线 id，必须来自清单' },
+          label: { type: 'string', description: '业务语义的操作标注，动词开头，保留界面原文按钮名' },
+        },
+        required: ['edgeId', 'label'],
+      },
+    },
+  },
+  required: ['labels'],
+} as const
+
+const edgeLabelSchema = z.object({
+  edgeId: z.string().min(1),
+  label: z.string().min(1).max(120),
+})
+
+export const relabelEdgesSchema = z.object({ labels: z.array(edgeLabelSchema).max(200) })
+export type EdgeRelabel = z.infer<typeof edgeLabelSchema>
+
+/** 标注改写裁剪：只有清单里的连线能被改写，漏答的保留机械标注 */
+export function sanitizeEdgeRelabels(raw: EdgeRelabel[], candidates: string[]): { relabel: Map<string, string>; rejected: number } {
+  const allowed = new Set(candidates)
+  const relabel = new Map<string, string>()
+  let rejected = 0
+  for (const r of raw) {
+    const label = r.label?.trim()
+    if (!allowed.has(r.edgeId) || !label) {
+      rejected += 1
+      continue
+    }
+    relabel.set(r.edgeId, label.slice(0, 120))
+  }
+  return { relabel, rejected }
+}
+
+export const parseRelabelEdges = (raw: string) => parseWithSchema(raw, relabelEdgesSchema, '标注语义化')
+export const parseRelabelEdgesObject = (obj: unknown) => parseObjectWithSchema(obj, relabelEdgesSchema, '标注语义化')
+
+/* ------------------------------ 同界面合并 ------------------------------ */
+
+export const MERGE_SCREENS_SCHEMA = {
+  type: 'object',
+  properties: {
+    pairs: {
+      type: 'array',
+      description: '每个候选对一条',
+      items: {
+        type: 'object',
+        properties: {
+          pairId: { type: 'string', description: '候选对编号，必须来自清单' },
+          merge: { type: 'boolean', description: '两屏是否为同一界面的不同瞬时状态。拿不准填 false' },
+        },
+        required: ['pairId', 'merge'],
+      },
+    },
+  },
+  required: ['pairs'],
+} as const
+
+const mergePairSchema = z.object({
+  pairId: z.string().min(1),
+  merge: z.boolean(),
+})
+
+export const mergeScreensSchema = z.object({ pairs: z.array(mergePairSchema).max(60) })
+export type MergeDecision = z.infer<typeof mergePairSchema>
+
+/** 合并判定裁剪：只认清单里的候选对，漏答与拿不准的一律不合并 */
+export function sanitizeMergeDecisions(raw: MergeDecision[], candidateIds: string[]): { merge: Set<string>; rejected: number } {
+  const allowed = new Set(candidateIds)
+  const merge = new Set<string>()
+  let rejected = 0
+  for (const d of raw) {
+    if (!allowed.has(d.pairId)) {
+      rejected += 1
+      continue
+    }
+    if (d.merge) merge.add(d.pairId)
+  }
+  return { merge, rejected }
+}
+
+export const parseMergeScreens = (raw: string) => parseWithSchema(raw, mergeScreensSchema, '同界面合并')
+export const parseMergeScreensObject = (obj: unknown) => parseObjectWithSchema(obj, mergeScreensSchema, '同界面合并')
 
 /* -------------------------------- 连线审查 ------------------------------- */
 

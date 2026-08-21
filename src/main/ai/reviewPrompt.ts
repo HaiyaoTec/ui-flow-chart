@@ -1,14 +1,26 @@
-import { MANUAL_LANE_ID, type FlowGraph, type FlowLane, type FlowNode } from '@shared/types'
+import { MANUAL_LANE_ID, type FlowEdge, type FlowGraph, type FlowLane, type FlowNode } from '@shared/types'
 import type { EdgeCandidateGroup } from '../engine/graphCleanup'
 import {
   EDGE_REVIEW_SCHEMA,
   LANE_CLASSIFY_SCHEMA,
+  MERGE_SCREENS_SCHEMA,
+  NAME_SCREENS_SCHEMA,
+  RELABEL_EDGES_SCHEMA,
   parseEdgeReview,
   parseEdgeReviewObject,
   parseLaneClassify,
   parseLaneClassifyObject,
+  parseMergeScreens,
+  parseMergeScreensObject,
+  parseNameScreens,
+  parseNameScreensObject,
+  parseRelabelEdges,
+  parseRelabelEdgesObject,
+  type EdgeRelabel,
   type GroupDecision,
   type LaneAssignment,
+  type MergeDecision,
+  type ScreenName,
 } from './parseReview'
 import type { ReviewTask } from './types'
 
@@ -40,14 +52,13 @@ export function capText(text: string, max = MAX_TOTAL_CHARS): string {
 /* ------------------------------ 一、泳道归类 ----------------------------- */
 
 const LANE_SYSTEM = `你是网站交互流程图的整理助手。
-用户在自动探索卡住时人工接管操作了一段，这段期间录到的界面暂时放在「人工接管」里，
-现在要按它们**实际属于哪个功能域**归入真实泳道。
+自动探索期间界面只按地址粗分了泳道，现在要按它们**实际属于哪个功能域**统一划分。
 
 要求：
 - 只做归类，不要修改界面标题，也不要新增或删除界面。
-- 优先复用已有泳道。泳道 id 用小写英文与连字符，如 entry / register / login / forgot。
-- 每个界面都给出结论；拿不准就把 confidence 填 low，系统会回落到它上游界面所在的泳道。
-- 新泳道最多两条，只有确实出现了新的功能域才建。`
+- 同一功能域的界面归到一条泳道。泳道 id 用小写英文与连字符，如 entry / register / login / forgot。
+- 每个界面都给出结论；拿不准就把 confidence 填 low，系统会按已有归属回落。
+- 新泳道给出中文 laneTitle；不要为单个界面单独建泳道。`
 
 function nodeBlock(n: FlowNode, upstream?: { lane: string; title: string }): string {
   const els = (n.probeSummary?.elements ?? []).slice(0, MAX_ELEMENTS_PER_NODE).map((e) => cut(e, 20))
@@ -121,7 +132,140 @@ export function buildLaneClassifyTask(
   }
 }
 
-/* ------------------------------ 二、连线审查 ----------------------------- */
+/* ------------------------------ 二、界面命名 ----------------------------- */
+
+const NAME_SYSTEM = `你是网站交互流程图的整理助手。
+自动探索期间界面标题只是机械取自页面文字，现在要给每个界面一个规范名称。
+
+要求：
+- title 用中文规范名词，如「注册表单·初始态」「登录·必填项未填校验」「游戏详情」。禁止口语化与比喻。
+- 同类界面的命名格式保持一致；同一界面的不同状态用「·」分隔主体与状态。
+- kind：normal 正常态；validation 校验或错误提示态（界面上出现校验、报错、拦截提示时）。
+- 只命名清单里的界面，逐个给出结论。`
+
+export function buildNameScreensTask(graph: FlowGraph, candidates: string[]): ReviewTask<{ names: ScreenName[] }> {
+  const byId = new Map(graph.nodes.map((n) => [n.id, n]))
+  const inbound = new Map<string, FlowEdge>()
+  for (const e of graph.edges) if (!inbound.has(e.to)) inbound.set(e.to, e)
+
+  const blocks = candidates.map((id) => {
+    const n = byId.get(id)!
+    const els = (n.probeSummary?.elements ?? []).slice(0, MAX_ELEMENTS_PER_NODE).map((e) => cut(e, 20))
+    const notices = n.probeSummary?.notices ?? []
+    const arrive = inbound.get(id)
+    return [
+      `  ${n.id}`,
+      `    页面文字：${cut(n.title, 60)}`,
+      `    地址：${cut(n.url, 100)}`,
+      arrive ? `    到达方式：${cut(arrive.label, 50)}（来自 ${cut(byId.get(arrive.from)?.title ?? arrive.from, 30)}）` : '',
+      els.length ? `    元素：${els.join(' / ')}` : '',
+      notices.length ? `    提示：${notices.map((x) => cut(x, 40)).join(' / ')}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n')
+  })
+
+  const user = capText(['## 待命名的界面', blocks.join('\n')].join('\n'))
+
+  return {
+    name: 'name_screens',
+    description: '为探索到的界面给出规范名称与性质',
+    system: NAME_SYSTEM,
+    user,
+    schema: NAME_SCREENS_SCHEMA as unknown as Record<string, unknown>,
+    maxTokens: 2000,
+    timeoutMs: 45_000,
+    parse: parseNameScreens,
+    parseObject: parseNameScreensObject,
+  }
+}
+
+/* ----------------------------- 三、标注语义化 ---------------------------- */
+
+const RELABEL_SYSTEM = `你是网站交互流程图的整理助手。
+连线上的操作标注是执行动作时机械生成的（如「点击「Daftar」」），
+现在结合两端界面把它们改写成带业务语义的标注。
+
+要求：
+- 动词开头，保留界面原文按钮名，如：点击「Daftar」进入注册、提交 → 系统校验失败：手机号格式。
+- 到达校验或错误提示界面的连线，标注里写明校验点。
+- 机械标注已经够准确的可以不改写，不出现在结果里即可。
+- 只改写清单里的连线，不要新增或删除。`
+
+export function buildRelabelEdgesTask(graph: FlowGraph, candidates: string[]): ReviewTask<{ labels: EdgeRelabel[] }> {
+  const byId = new Map(graph.nodes.map((n) => [n.id, n]))
+  const picked = graph.edges.filter((e) => candidates.includes(e.id))
+
+  const lines = picked.map((e) => {
+    const from = byId.get(e.from)
+    const to = byId.get(e.to)
+    return `  ${e.id}｜${cut(from?.title ?? e.from, 26)} → ${cut(to?.title ?? e.to, 26)}｜现标注：${cut(e.label, 40)}${
+      to?.probeSummary?.notices?.length ? `｜目标界面提示：${cut(to.probeSummary.notices.join(' / '), 40)}` : ''
+    }`
+  })
+
+  const user = capText(['## 待改写的连线', ...lines].join('\n'))
+
+  return {
+    name: 'relabel_edges',
+    description: '把机械生成的连线标注改写成业务语义标注',
+    system: RELABEL_SYSTEM,
+    user,
+    schema: RELABEL_EDGES_SCHEMA as unknown as Record<string, unknown>,
+    maxTokens: 2000,
+    timeoutMs: 45_000,
+    parse: parseRelabelEdges,
+    parseObject: parseRelabelEdgesObject,
+  }
+}
+
+/* ----------------------------- 四、同界面合并 ---------------------------- */
+
+const MERGE_SYSTEM = `你是网站交互流程图的整理助手。
+同一个界面可能因为瞬时差异（弹层开合、轻微内容变化）被记成了两屏，
+现在逐对判定候选对是否为同一界面。
+
+要求：
+- merge 为 true 表示两屏应合并为一个界面。拿不准一律填 false——错误的合并比冗余更难恢复。
+- 标题、元素构成、提示文案基本一致才算同一界面；同一页面的不同表单状态（空表单与报错态）不算。
+- 只判定清单里的候选对。`
+
+export interface MergeCandidatePair {
+  id: string
+  keepId: string
+  loserId: string
+}
+
+export function buildMergeScreensTask(
+  graph: FlowGraph,
+  pairs: MergeCandidatePair[]
+): ReviewTask<{ pairs: MergeDecision[] }> {
+  const byId = new Map(graph.nodes.map((n) => [n.id, n]))
+  const block = (id: string): string => {
+    const n = byId.get(id)!
+    const els = (n.probeSummary?.elements ?? []).slice(0, MAX_ELEMENTS_PER_NODE).map((e) => cut(e, 16))
+    return `    ${n.id}：${cut(n.title, 40)}｜${els.join(' / ')}${
+      n.probeSummary?.notices?.length ? `｜提示：${cut(n.probeSummary.notices.join(' / '), 40)}` : ''
+    }`
+  }
+  const blocks = pairs.map((p) => [`  ${p.id}（地址相同）：`, block(p.keepId), block(p.loserId)].join('\n'))
+
+  const user = capText(['## 待判定的候选对', blocks.join('\n')].join('\n'))
+
+  return {
+    name: 'merge_screens',
+    description: '判定同地址的两屏是否为同一界面',
+    system: MERGE_SYSTEM,
+    user,
+    schema: MERGE_SCREENS_SCHEMA as unknown as Record<string, unknown>,
+    maxTokens: 1200,
+    timeoutMs: 45_000,
+    parse: parseMergeScreens,
+    parseObject: parseMergeScreensObject,
+  }
+}
+
+/* ------------------------------ 五、连线审查 ----------------------------- */
 
 const EDGE_SYSTEM = `你是网站交互流程图的整理助手。
 自动探索时同一个操作可能被反复记录，同一对界面之间因此挂了多条含义重复的连线。

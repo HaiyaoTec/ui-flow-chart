@@ -1,40 +1,16 @@
 import { z } from 'zod'
 import type { AiAction } from '@shared/types'
 
+/**
+ * 探索问询的输出结构。界面命名与连线标注已移到图谱生成阶段，
+ * 这里只剩动作本身；模型多输出的字段（旧版的 screen / edgeLabel）会被剥掉。
+ */
 export const actionSchema = z.object({
   action: z.enum(['click', 'fill', 'scroll', 'back', 'done', 'need_human']),
   targetIdx: z.number().int().nonnegative().optional(),
   value: z.string().max(200).optional(),
   scrollDelta: z.number().int().optional(),
   reason: z.string().min(1).max(500),
-  screen: z.object({
-    id: z
-      .string()
-      .min(1)
-      .max(60)
-      .transform((s) =>
-        s
-          .trim()
-          .toLowerCase()
-          .replace(/[^a-z0-9-]+/g, '-')
-          .replace(/^-+|-+$/g, '')
-      ),
-    title: z.string().min(1).max(80),
-    lane: z
-      .string()
-      .min(1)
-      .max(40)
-      .transform((s) =>
-        s
-          .trim()
-          .toLowerCase()
-          .replace(/[^a-z0-9-]+/g, '-')
-          .replace(/^-+|-+$/g, '')
-      ),
-    laneTitle: z.string().max(40).optional(),
-    kind: z.enum(['normal', 'validation']).default('normal'),
-  }),
-  edgeLabel: z.string().min(1).max(120),
   needHumanReason: z.enum(['login', 'captcha', 'payment', 'other']).optional(),
 })
 
@@ -103,7 +79,6 @@ function normalize(a: AiAction): AiAction {
   const out = { ...a }
   if (out.action === 'scroll' && !out.scrollDelta) out.scrollDelta = 600
   if (out.action === 'need_human' && !out.needHumanReason) out.needHumanReason = 'other'
-  if (!out.screen.id) out.screen.id = 'screen'
   return out
 }
 

@@ -20,6 +20,11 @@ export function mergePatch(graph: FlowGraph, patch: GraphPatch): FlowGraph {
     if (!next.lanes.some((x) => x.id === l.id)) next.lanes.push(l)
   }
 
+  for (const l of patch.updatedLanes ?? []) {
+    const i = next.lanes.findIndex((x) => x.id === l.id)
+    if (i >= 0) next.lanes[i] = l
+  }
+
   // 节点可能因为自动布局而带回新坐标，按 id 覆盖式合并
   for (const n of [...(patch.addedNodes ?? []), ...(patch.updatedNodes ?? [])]) {
     const i = next.nodes.findIndex((x) => x.id === n.id)

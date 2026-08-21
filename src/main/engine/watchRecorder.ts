@@ -134,6 +134,8 @@ export class WatchRecorder {
             createdBy: 'human',
             probe,
           })
+          // 标题是机械占位，等图谱生成阶段统一命名
+          node.draft = true
           const shot = await this.opts.capture()
           this.store.saveShot(node.id, shot.png, shot.jpegBase64)
           nodes.push(node)
