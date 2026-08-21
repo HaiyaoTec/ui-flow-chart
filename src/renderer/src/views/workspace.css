@@ -62,6 +62,37 @@
   font-size: 12.5px;
 }
 
+/* 探索计划条：各入口的覆盖状态 */
+.plan-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  font-size: 12px;
+}
+.plan-chip {
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+.plan-chip.active {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.plan-chip.covered {
+  color: var(--accent);
+  border-color: transparent;
+  background: var(--accent-soft);
+}
+.plan-chip.abandoned {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
 /* 提问卡片：AI 只缺一条信息，答完即继续，不必接触页面 */
 .ask-banner {
   display: flex;

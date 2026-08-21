@@ -40,6 +40,9 @@ export function buildUserText(input: AiDecideInput): string {
   return [
     `## 探索目标`,
     input.goal,
+    input.subtask
+      ? `\n## 当前子任务\n覆盖「${input.subtask}」入口的主要路径与关键校验态。这个子任务完成后输出 done，系统会带你去下一个入口。`
+      : ``,
     ``,
     `## 当前状态`,
     `第 ${input.step} 步；剩余步数 ${input.budgets.stepsLeft}，剩余 AI 调用 ${input.budgets.aiCallsLeft}`,

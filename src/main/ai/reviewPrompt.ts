@@ -1,10 +1,11 @@
-import { MANUAL_LANE_ID, type FlowEdge, type FlowGraph, type FlowLane, type FlowNode } from '@shared/types'
+import { MANUAL_LANE_ID, type FlowEdge, type FlowGraph, type FlowLane, type FlowNode, type ProbeResult } from '@shared/types'
 import type { EdgeCandidateGroup } from '../engine/graphCleanup'
 import {
   EDGE_REVIEW_SCHEMA,
   LANE_CLASSIFY_SCHEMA,
   MERGE_SCREENS_SCHEMA,
   NAME_SCREENS_SCHEMA,
+  PLAN_SCHEMA,
   RELABEL_EDGES_SCHEMA,
   parseEdgeReview,
   parseEdgeReviewObject,
@@ -14,12 +15,15 @@ import {
   parseMergeScreensObject,
   parseNameScreens,
   parseNameScreensObject,
+  parsePlanEntries,
+  parsePlanEntriesObject,
   parseRelabelEdges,
   parseRelabelEdgesObject,
   type EdgeRelabel,
   type GroupDecision,
   type LaneAssignment,
   type MergeDecision,
+  type PlanEntryRaw,
   type ScreenName,
 } from './parseReview'
 import type { ReviewTask } from './types'
@@ -129,6 +133,38 @@ export function buildLaneClassifyTask(
     timeoutMs: 45_000,
     parse: parseLaneClassify,
     parseObject: parseLaneClassifyObject,
+  }
+}
+
+/* ------------------------------ 〇、探索计划 ----------------------------- */
+
+const PLAN_SYSTEM = `你是网站交互流程探索的规划助手。
+基于首屏的可交互元素，列出这次探索值得覆盖的功能入口清单。
+
+要求：
+- 每个入口是一个功能域（注册、登录、找回密码、商品浏览），不是同一功能的重复按钮。
+- 按业务重要性排序，最多 8 个；探索会按这个顺序逐个覆盖。
+- entryText 抄首屏元素的原文文案，供探索时定位入口；只依据清单里真实存在的元素，不要虚构。
+- 纯说明性的链接（备案号、语言切换、外部合作方）不列。`
+
+export function buildPlanTask(goal: string, probe: ProbeResult): ReviewTask<{ entries: PlanEntryRaw[] }> {
+  const els = probe.elements.slice(0, 40).map((e) => {
+    const label = e.text || e.placeholder || e.name || '(无文案)'
+    return `  [${e.idx}] <${e.tag}> ${cut(label, 40)}`
+  })
+  const user = capText(
+    ['## 探索目标', goal, '', '## 首屏地址', probe.url, '', '## 首屏可交互元素', ...els].join('\n')
+  )
+  return {
+    name: 'plan_entries',
+    description: '基于首屏产出探索计划',
+    system: PLAN_SYSTEM,
+    user,
+    schema: PLAN_SCHEMA as unknown as Record<string, unknown>,
+    maxTokens: 1200,
+    timeoutMs: 45_000,
+    parse: parsePlanEntries,
+    parseObject: parsePlanEntriesObject,
   }
 }
 

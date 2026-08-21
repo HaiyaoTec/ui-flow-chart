@@ -199,6 +199,55 @@ export function sanitizeEdgeRelabels(raw: EdgeRelabel[], candidates: string[]): 
 export const parseRelabelEdges = (raw: string) => parseWithSchema(raw, relabelEdgesSchema, '标注语义化')
 export const parseRelabelEdgesObject = (obj: unknown) => parseObjectWithSchema(obj, relabelEdgesSchema, '标注语义化')
 
+/* ------------------------------- 探索计划 ------------------------------- */
+
+export const PLAN_SCHEMA = {
+  type: 'object',
+  properties: {
+    entries: {
+      type: 'array',
+      description: '按业务重要性排序的功能入口，最多 8 个',
+      items: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: '功能入口名称，如「注册流程」' },
+          entryText: { type: 'string', description: '首屏上该入口元素的原文文案，供探索时定位' },
+        },
+        required: ['title'],
+      },
+    },
+  },
+  required: ['entries'],
+} as const
+
+const planEntrySchema = z.object({
+  title: z.string().min(1).max(40),
+  entryText: z.string().max(60).optional(),
+})
+
+export const planEntriesSchema = z.object({ entries: z.array(planEntrySchema).max(12) })
+export type PlanEntryRaw = z.infer<typeof planEntrySchema>
+
+/** 计划裁剪：去重、截断到 8 个。空计划由调用方回落为自由探索 */
+export function sanitizePlanEntries(raw: PlanEntryRaw[]): { entries: PlanEntryRaw[]; rejected: number } {
+  const seen = new Set<string>()
+  const entries: PlanEntryRaw[] = []
+  let rejected = 0
+  for (const e of raw) {
+    const title = e.title?.trim()
+    if (!title || seen.has(title) || entries.length >= 8) {
+      rejected += 1
+      continue
+    }
+    seen.add(title)
+    entries.push({ title: title.slice(0, 40), entryText: e.entryText?.trim().slice(0, 60) || undefined })
+  }
+  return { entries, rejected }
+}
+
+export const parsePlanEntries = (raw: string) => parseWithSchema(raw, planEntriesSchema, '探索计划')
+export const parsePlanEntriesObject = (obj: unknown) => parseObjectWithSchema(obj, planEntriesSchema, '探索计划')
+
 /* ------------------------------ 同界面合并 ------------------------------ */
 
 export const MERGE_SCREENS_SCHEMA = {

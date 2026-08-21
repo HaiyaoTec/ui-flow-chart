@@ -141,7 +141,7 @@ export async function runExploreCheck(win: BaseWindow, site: string, aiBase: str
     }
 
     // 步数会随页面时序浮动，收尾整理又要多两次 AI 往返，等宽一点，免得把「还在跑」误判成失败
-    let snap = await waitFor(['finished', 'failed', 'paused', 'awaiting_human', 'asking'], 180_000)
+    let snap = await waitFor(['finished', 'failed', 'paused', 'awaiting_human', 'asking'], 300_000)
 
     /*
      * ask 场景：mock 在起步向用户确认探索方向。这里替用户作答，
@@ -150,7 +150,7 @@ export async function runExploreCheck(win: BaseWindow, site: string, aiBase: str
     if (scenario === 'ask' && snap.state === 'asking') {
       out.ask = snap.ask
       sessions.answerAsk(projectId, '注册流程')
-      snap = await waitFor(['finished', 'failed', 'paused', 'awaiting_human'], 180_000)
+      snap = await waitFor(['finished', 'failed', 'paused', 'awaiting_human'], 300_000)
     }
 
     if (takeover && snap.state === 'awaiting_human') {
@@ -220,31 +220,45 @@ export async function runExploreCheck(win: BaseWindow, site: string, aiBase: str
 
     const failed = checkGraph(graph, snap.state, takeover, aiReview)
 
+    const readJsonl = async (file: string): Promise<Array<Record<string, unknown>>> => {
+      const { readFileSync: rf, existsSync: ex } = await import('node:fs')
+      const p = join(projectDir(project.id), file)
+      if (!ex(p)) return []
+      return rf(p, 'utf8')
+        .trim()
+        .split('\n')
+        .map((l) => {
+          try {
+            return JSON.parse(l) as Record<string, unknown>
+          } catch {
+            return {}
+          }
+        })
+    }
+
     /*
      * ask 场景的链路断言：问题与应答都要留痕。
      * 应答内容是非敏感的，落盘必须原文可审计；提问期不该建录制器，
      * 图上也不该出现人工录制的界面。
      */
     if (scenario === 'ask') {
-      const { readFileSync: rf, existsSync: ex } = await import('node:fs')
-      const sj = join(projectDir(project.id), 'session.jsonl')
-      const rows = ex(sj)
-        ? rf(sj, 'utf8')
-            .trim()
-            .split('\n')
-            .map((l) => {
-              try {
-                return JSON.parse(l) as Record<string, unknown>
-              } catch {
-                return {}
-              }
-            })
-        : []
+      const rows = await readJsonl('session.jsonl')
       if (!rows.some((r) => r.kind === 'ask')) failed.push('没有发起提问，本轮没验到 ask 链路')
       const answer = rows.find((r) => r.kind === 'ask-answer' && r.answered === true)
       if (!answer) failed.push('应答没有落盘')
       else if (answer.answer !== '注册流程') failed.push(`非敏感应答应原文落盘，实际：${String(answer.answer)}`)
       if (graph?.nodes.some((n) => n.createdBy === 'human')) failed.push('提问不该触发录制，图上不该有人工录制界面')
+    }
+
+    /*
+     * offsite 场景（偏离负向）：mock 起步误点外链陷阱（127.0.0.1 主机名，对引擎是站外）。
+     * 引擎必须回退且不为站外界面建图，偏离在轨迹里留痕，之后照常走完注册流程——
+     * 后者由上面的 normal 断言（校验态命名与标注）一并验证。
+     */
+    if (scenario === 'offsite') {
+      if (graph?.nodes.some((n) => n.url.includes('127.0.0.1'))) failed.push('站外界面不该建图')
+      const rows = await readJsonl('trace.jsonl')
+      if (!rows.some((r) => r.action === 'offsite')) failed.push('偏离没有在轨迹里留痕')
     }
 
     out.assertions = { failed }

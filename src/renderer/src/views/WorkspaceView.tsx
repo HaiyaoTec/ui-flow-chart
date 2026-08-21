@@ -15,6 +15,13 @@ import './workspace.css'
 
 const RUNNING = ['launching', 'observing', 'thinking', 'acting', 'resuming']
 
+const PLAN_STATUS_LABEL: Record<string, string> = {
+  pending: '待探索',
+  active: '探索中',
+  covered: '已覆盖',
+  abandoned: '已放弃',
+}
+
 /** 恒等的空数组：每次渲染新建会让 zustand 认为状态变了，白白重渲染 */
 const EMPTY_LOGS: LogLine[] = []
 
@@ -258,6 +265,18 @@ export default function WorkspaceView({ onBack, onSwitchProject }: Props) {
           </span>
         </div>
       )}
+
+      {/* 探索计划：各入口的覆盖状态。规划问询失败时没有计划，这一条不出现 */}
+      {session?.plan?.entries.length ? (
+        <div className="plan-strip">
+          <span className="muted">探索计划</span>
+          {session.plan.entries.map((e) => (
+            <span key={e.id} className={`plan-chip ${e.status}`} title={PLAN_STATUS_LABEL[e.status]}>
+              {e.title}
+            </span>
+          ))}
+        </div>
+      ) : null}
 
       {asking && session?.ask && (
         <div className="ask-banner">

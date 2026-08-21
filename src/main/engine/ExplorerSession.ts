@@ -5,6 +5,7 @@ import {
   MANUAL_LANE_TITLE,
   type AiAction,
   type AskRequest,
+  type ExplorePlanEntry,
   type FlowEdge,
   type FlowLane,
   type FlowNode,
@@ -18,6 +19,8 @@ import {
 } from '@shared/types'
 import type { IAiClient } from '../ai/types'
 import { ActionParseError } from '../ai/parseAction'
+import { sanitizePlanEntries } from '../ai/parseReview'
+import { buildPlanTask } from '../ai/reviewPrompt'
 import { GraphStore } from './graphStore'
 import { log } from '../log'
 import { laneOfUrl, mechanicalEdgeLabel, placeholderTitle } from './naming'
@@ -51,6 +54,8 @@ const MAX_SAME_SCREEN_FAILS = 3
 const MAX_ACTIONS_PER_SCREEN = 5
 const MAX_VISITS_PER_SIGNATURE = 4
 const NO_PROGRESS_LIMIT = 6
+/** 有探索计划时，同一入口连续这么多步没有新界面就放弃它、换下一个入口 */
+const PLAN_STALL_LIMIT = 5
 
 /** 第三方验证码服务的域名特征，命中即可确信 */
 const CAPTCHA_IFRAME = /captcha|recaptcha|hcaptcha|turnstile|geetest|arkoselabs/i
@@ -100,6 +105,10 @@ export class ExplorerSession {
   /** asking 状态下待回答的问题与已到达的应答 */
   private pendingAsk: AskRequest | null = null
   private askAnswer: string | null = null
+  /** 探索计划。规划问询失败时为 null，回落为自由探索 */
+  private plan: ExplorePlanEntry[] | null = null
+  /** 连续落在站外的次数：第一次先试历史回退，连续偏离直接回入口锚点 */
+  private offsiteStreak = 0
   /** 本轮是否已经收尾整理过。loop 的正常出口与 catch 分支都会调，只许跑一次 */
   private finalizeDone = false
   private watcher: WatchRecorder | null = null
@@ -159,6 +168,7 @@ export class ExplorerSession {
       runId: this.runId || undefined,
       elapsedMs: this.elapsedMs(),
       ask: this.pendingAsk ?? undefined,
+      plan: this.plan ? { entries: this.plan.map((e) => ({ ...e })) } : undefined,
     }
   }
 
@@ -208,6 +218,8 @@ export class ExplorerSession {
     this.lastEdgeLabel = ''
     this.pendingAsk = null
     this.askAnswer = null
+    this.plan = null
+    this.offsiteStreak = 0
     this.stopRequested = false
     this.pauseRequested = false
     this.takeoverRequested = false
@@ -356,6 +368,7 @@ export class ExplorerSession {
       if (this.state === 'launching') {
         await this.deps.openTarget(project.targetUrl)
         this.log('info', `已打开 ${project.targetUrl}`)
+        await this.buildPlan()
       }
 
       while (!this.stopRequested) {
@@ -379,6 +392,22 @@ export class ExplorerSession {
           `第 ${this.step} 步 · ${probe.url} · ${probe.elements.length} 个可交互元素` +
             (probe.notices.length ? ` · 提示：${probe.notices.join(' / ')}` : '')
         )
+
+        /* ---------- 偏离判定：离开目标站点立即回退，站外界面不建图 ---------- */
+        if (this.isOffsite(probe.url)) {
+          this.offsiteStreak += 1
+          this.trace({ step: this.step, url: probe.url, action: 'offsite' })
+          this.log('warn', `离开目标站点（${probe.url}），已回退`)
+          // 第一次先试历史回退；连续偏离（重定向陷阱）直接回入口锚点
+          if (this.offsiteStreak === 1 && this.deps.driver.canGoBack()) await this.deps.driver.back()
+          else await this.deps.driver.goto(project.targetUrl).catch(() => undefined)
+          // 站外那一步的转移不该标到图上
+          this.lastEdgeLabel = ''
+          this.lastActionKind = ''
+          await this.deps.driver.clearUserInput()
+          continue
+        }
+        this.offsiteStreak = 0
 
         /* ---------- 去重与建图 ---------- */
         const sig = signatureHash(probe)
@@ -467,6 +496,11 @@ export class ExplorerSession {
 
         if (action.action === 'done') {
           this.trace({ step: this.step, url: probe.url, sig, nodeId: placed.nodeId, isNew: placed.isNew, action: 'done' })
+          // 有计划时 done 表示当前入口覆盖完毕：取下一个入口继续，全部覆盖完才收尾
+          if (this.plan && (await this.advanceEntry('covered'))) {
+            this.log('info', `当前入口覆盖完毕：${action.reason}`)
+            continue
+          }
           this.log('info', `AI 判定探索完成：${action.reason}`)
           return await this.finalizeAndFinish()
         }
@@ -504,7 +538,17 @@ export class ExplorerSession {
           this.forbid(`界面「${placeholderTitle(probe)}」上的可选动作已尝试多次，请换一个入口或输出 done`)
           this.log('warn', '同一界面动作已穷尽，且无法回退')
         }
-        if (this.noProgress >= NO_PROGRESS_LIMIT) {
+        /*
+         * 停滞处理。有计划时是硬约束：当前入口连续无进展就放弃它、换下一个入口，
+         * 计划走完即收敛——替代「向模型追加禁选提示、期望它自行绕开」的软约束。
+         * 无计划时保持原有的提示与收敛判定。
+         */
+        if (this.plan && this.noProgress >= PLAN_STALL_LIMIT) {
+          if (await this.advanceEntry('abandoned')) continue
+          this.log('info', '计划内的入口都已处理，判定探索收敛')
+          return await this.finalizeAndFinish()
+        }
+        if (!this.plan && this.noProgress >= NO_PROGRESS_LIMIT) {
           this.forbid('连续多步没有发现新界面，请考虑收敛或输出 done')
           this.noProgress = 0
           this.staleRounds += 1
@@ -685,6 +729,7 @@ export class ExplorerSession {
             },
             screenshotJpegBase64: jpeg,
             probe,
+            subtask: this.activeEntry()?.title,
             visitCount: this.visits.get(signatureHash(probe)),
             lastOutcome: [this.lastOutcome, lastErr && `上一次输出无法解析：${lastErr}，请严格按结构重新输出`]
               .filter(Boolean)
@@ -934,6 +979,91 @@ export class ExplorerSession {
     this.setState('resuming')
     await delay(400)
     this.setState('observing')
+  }
+
+  /* ------------------------------- 探索计划 ------------------------------- */
+
+  /**
+   * 规划阶段：基于首屏产出功能入口清单。
+   *
+   * 把「探索这个网站」的开放目标收敛为「完成当前入口的覆盖」，
+   * 每步问询携带明确的子任务。问询失败回落为自由探索，不影响流程。
+   */
+  private async buildPlan(): Promise<void> {
+    if (this.stopRequested || this.pauseRequested) return
+    try {
+      const probe = await this.deps.driver.waitStable()
+      this.abort = new AbortController()
+      this.aiCalls += 1
+      const out = await this.deps.ai.review(buildPlanTask(this.goal, probe), this.abort.signal)
+      const s = sanitizePlanEntries(out.entries)
+      if (!s.entries.length) return
+      this.plan = s.entries.map((e, i) => ({
+        id: `p${i + 1}`,
+        title: e.title,
+        entryText: e.entryText,
+        status: i === 0 ? ('active' as const) : ('pending' as const),
+      }))
+      this.record({
+        kind: 'plan',
+        entries: this.plan.map((e) => ({ id: e.id, title: e.title, entryText: e.entryText })),
+      })
+      this.log('info', `探索计划：${this.plan.map((e) => e.title).join(' → ')}`)
+    } catch (e) {
+      this.log('warn', `探索计划未生成：${e instanceof Error ? e.message : String(e)}，按自由探索继续`)
+    } finally {
+      this.abort = null
+    }
+  }
+
+  private activeEntry(): ExplorePlanEntry | null {
+    return this.plan?.find((e) => e.status === 'active') ?? null
+  }
+
+  /**
+   * 结束当前入口（已覆盖 / 已放弃），取下一个待探索入口并回到入口锚点。
+   * 返回 false 表示计划已走完，由调用方收尾。
+   */
+  private async advanceEntry(status: 'covered' | 'abandoned'): Promise<boolean> {
+    if (!this.plan) return false
+    const cur = this.activeEntry()
+    if (cur) {
+      cur.status = status
+      this.log('info', status === 'covered' ? `入口「${cur.title}」已覆盖` : `入口「${cur.title}」连续无进展，已放弃`)
+    }
+    const next = this.plan.find((e) => e.status === 'pending')
+    this.record({ kind: 'entry-switch', from: cur?.id, to: next?.id, endedAs: status })
+    if (!next) return false
+
+    next.status = 'active'
+    this.trace({ step: this.step, url: this.project?.targetUrl, action: 'entry-switch', outcome: next.title })
+    // 回到入口锚点，下一轮从首屏进入新入口
+    await this.deps.driver.goto(this.project!.targetUrl).catch(() => undefined)
+    await this.deps.driver.clearUserInput()
+    /*
+     * 新入口是新的连续性：停滞与失败计数重新起算；
+     * 上一入口末屏到锚点的跳转是引擎导航，不该在图上留边，链路从锚点重新开始。
+     */
+    this.noProgress = 0
+    this.staleRounds = 0
+    this.screenFails.clear()
+    this.screenActions.clear()
+    this.lastEdgeLabel = ''
+    this.lastActionKind = ''
+    this.currentNodeId = null
+    return true
+  }
+
+  /** 目标站点域判定：主机名相同或互为子域（www、m 等前缀差异不算偏离） */
+  private isOffsite(url: string): boolean {
+    try {
+      const host = new URL(url).hostname
+      const home = new URL(this.project!.targetUrl).hostname
+      if (!host || !home) return false
+      return !(host === home || host.endsWith(`.${home}`) || home.endsWith(`.${host}`))
+    } catch {
+      return false
+    }
   }
 
   /* --------------------------------- 工具 --------------------------------- */

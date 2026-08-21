@@ -42,6 +42,8 @@ const filled = new Map()
 let callCount = 0
 /** ask 场景只提问一次，应答后走正常流程 */
 let askAsked = false
+/** offsite 场景只踩一次外链陷阱，回退后走正常流程 */
+let trapDone = false
 
 /** 从提示文本里还原可交互元素清单 */
 function parseElements(text) {
@@ -85,6 +87,15 @@ function decide(text) {
       reason: '有两条主路径，先确认用户想覆盖哪条',
       question: '优先探索哪条路径？',
       options: ['注册流程', '登录流程'],
+    }
+  }
+
+  // offsite 场景：起步先误点外链陷阱，验证引擎回退后还能走完正常流程
+  if (SCENARIO === 'offsite' && (path === '/' || path.endsWith('index.html')) && !trapDone) {
+    const trap = find(els, /合作伙伴/)
+    if (trap) {
+      trapDone = true
+      return { action: 'click', targetIdx: trap.idx, reason: '看看合作伙伴入口' }
     }
   }
 
@@ -251,7 +262,17 @@ function reviewKind(body, text) {
   if (tools.includes('name_screens') || /## 待命名的界面/.test(text)) return 'name_screens'
   if (tools.includes('relabel_edges') || /## 待改写的连线/.test(text)) return 'relabel_edges'
   if (tools.includes('merge_screens') || /## 待判定的候选对/.test(text)) return 'merge_screens'
+  if (tools.includes('plan_entries') || /## 首屏可交互元素/.test(text)) return 'plan_entries'
   return null
+}
+
+/** 规划应答：按首屏真实存在的入口列计划 */
+function planEntries(text) {
+  const entries = []
+  if (/\[\d+\] <a> 注册/.test(text)) entries.push({ title: '注册流程', entryText: '注册' })
+  if (/\[\d+\] <a> 登录|<button> 登录/.test(text)) entries.push({ title: '登录流程', entryText: '登录' })
+  if (!entries.length) entries.push({ title: '主流程' })
+  return { entries }
 }
 
 /** 从问询文本里解析节点块：两个空格的 id 行 + 四个空格的属性行 */
@@ -406,7 +427,9 @@ const server = createServer((req, res) => {
               ? nameScreens(text)
               : kind === 'relabel_edges'
                 ? relabelEdges(text)
-                : mergeScreens(text)
+                : kind === 'plan_entries'
+                  ? planEntries(text)
+                  : mergeScreens(text)
       const payload = isAnthropic
         ? { content: [{ type: 'tool_use', name: kind, input: out }], model: body.model }
         : { choices: [{ message: { content: JSON.stringify(out) } }], model: body.model }

@@ -313,6 +313,8 @@ export interface SessionSnapshot {
   elapsedMs?: number
   /** asking 状态下待回答的问题，界面据此渲染问题卡片 */
   ask?: AskRequest
+  /** 探索计划与各入口的覆盖状态，界面据此渲染计划条 */
+  plan?: ExplorePlan
 }
 
 export type SessionEvent =
@@ -380,12 +382,34 @@ export interface AiDecideInput {
   budgets: { stepsLeft: number; aiCallsLeft: number }
   screenshotJpegBase64: string
   probe: ProbeResult
+  /** 当前子任务：探索计划里正在覆盖的入口，如「注册流程」 */
+  subtask?: string
   /** 当前界面此前被访问过几次，用于提示模型换方向 */
   visitCount?: number
   /** 上一步的执行结果或失败反馈 */
   lastOutcome?: string
   /** 已知会导致回环、禁止再选的动作描述 */
   forbidden?: string[]
+}
+
+/* ------------------------------- 探索计划 -------------------------------- */
+
+/**
+ * 探索计划：基于首屏产出的功能入口清单。
+ * 每个入口是一个子任务，探索按序逐个覆盖；把「探索这个网站」的开放目标
+ * 收敛为「完成当前入口的覆盖」，模型每步的目标因此是明确的。
+ */
+export interface ExplorePlanEntry {
+  id: string
+  /** 功能入口名称，如「注册流程」 */
+  title: string
+  /** 首屏上入口元素的文案，提示模型从哪里进入 */
+  entryText?: string
+  status: 'pending' | 'active' | 'covered' | 'abandoned'
+}
+
+export interface ExplorePlan {
+  entries: ExplorePlanEntry[]
 }
 
 /* --------------------------------- 轨迹 ---------------------------------- */
@@ -404,8 +428,11 @@ export interface TraceStep {
   /** 这一步落到的节点与是否新建 */
   nodeId: string
   isNew: boolean
-  /** 本步执行的动作与结果。need_human / done 也记 */
-  action: AiActionKind
+  /**
+   * 本步执行的动作与结果。need_human / done / ask 也记；
+   * offsite（离开目标站点被回退）与 entry-switch（切换计划入口）是引擎步，不建图
+   */
+  action: AiActionKind | 'offsite' | 'entry-switch'
   targetText?: string
   ok?: boolean
   outcome?: string
